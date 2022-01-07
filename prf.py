@@ -27,7 +27,7 @@ class GGM_PRF:
             else:
                 seed = prg_output[0:16]
 
-        return prg_output
+        return seed
 
 
 prf_key = secrets.token_bytes(16)
