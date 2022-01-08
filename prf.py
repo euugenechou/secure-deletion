@@ -22,7 +22,7 @@ class GGM_PRF:
         seed = self.key
         for i in range(0, 128):
             prg_output = self.prg(seed)
-            if x >> i & 1:
+            if x >> (127 - i) & 1:
                 seed = prg_output[16:]
             else:
                 seed = prg_output[0:16]
