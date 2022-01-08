@@ -4,7 +4,7 @@ KEY_PREFIX = 0
 KEY_DEPTH = 1
 KEY_VALUE = 2
 
-class GGM_PRF:
+class PPRF:
 
     def __init__(self, key):
         self.iv = secrets.randbits(128)

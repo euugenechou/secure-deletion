@@ -1,4 +1,4 @@
-from pprf import GGM_PRF
+from pprf import PPRF
 import random
 import secrets
 import sys
@@ -8,7 +8,7 @@ delete_times = []
 eval_times = []
 
 prf_key = secrets.token_bytes(16)
-prf = GGM_PRF(prf_key)
+prf = PPRF(prf_key)
 
 for i in range(0, 2000):
     start = time.perf_counter()
