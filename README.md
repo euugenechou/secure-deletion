@@ -17,7 +17,7 @@ The following table shows the average PPRF evaluation and puncturing times acros
 |---------------------------|:------:|:------:|:------:|:------:|:------:|:-------:|
 |     Avg. Eval Time (s)    | 0.0132 | 0.0129 | 0.0128 | 0.0127 | 0.0126 | 0.0125  |
 |    Avg. Delete Time (s)   | 0.0133 | 0.0131 | 0.013  | 0.0129 | 0.013  | 0.0133  |
-| Avg. Key Size (#sub-keys) | 12050  | 59079  | 117150 | 289568 | 574109 | 1138264 |
+| Avg. Key Size (#sub-keys) | 12,050  | 59,079  | 117,150 | 289,568 | 574,109 | 1,138,264 |
 
 Our preliminary results show that evaluation and puncturing times are essentially constant across the number of punctures. Unsurprisingly, the punctured key size grows linearly with the number of punctures. However, **our experimental results showed that only ~5% of the punctured key is needed in order to evaluate 99% of the PPRF points**. In practice, this means that only a small portion of the PPRF key is needed in memory. 
 
