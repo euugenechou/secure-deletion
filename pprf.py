@@ -23,24 +23,28 @@ class PPRF:
 
     # Punctures the PRF at a point x and returns a new punctured key
     def puncture(self, x):
-        key = self.__get_longest_matching_prefix(x)
+        key, key_idx = self.__get_longest_matching_prefix(x)
         seed = key[KEY_VALUE]
         check_val = key[KEY_PREFIX]
         prefix = key[KEY_PREFIX]
-        self.key.remove(key)
+        self.key.pop(key_idx)
+        new_keys = []
         for i in range(key[KEY_DEPTH], 128):
             prg_output = self.__prg(seed)
             bit = x >> (127 - i) & 1
             prefix_add = (1 - bit) * (2 ** (127 - i))
             if bit:
                 seed = prg_output[16:]
-                bisect.insort(self.key, (prefix + prefix_add, i + 1, prg_output[:16]))
+                #bisect.insort(self.key, (prefix + prefix_add, i + 1, prg_output[:16]))
+                bisect.insort(new_keys, (prefix + prefix_add, i + 1, prg_output[:16]))
             else:
                 seed = prg_output[:16]
-                bisect.insort(self.key, (prefix + prefix_add, i + 1, prg_output[16:]))
+                #bisect.insort(self.key, (prefix + prefix_add, i + 1, prg_output[16:]))
+                bisect.insort(new_keys, (prefix + prefix_add, i + 1, prg_output[16:]))
 
             prefix += bit * (2 ** (127 - i))
 
+        self.key[key_idx:key_idx] = new_keys
         return self.key
 
     # Get key that can evaluate the point x
@@ -48,15 +52,15 @@ class PPRF:
         i = bisect.bisect_left(self.key, (x, 2 ** 128, 2 ** 128))
 
         if i == len(self.key):
-            return self.key[i - 1]
+            return self.key[i - 1], i - 1
         elif self.key[i] == x:
-            return self.key[i]
+            return self.key[i], i
 
-        return self.key[i - 1]
+        return self.key[i - 1], i - 1
 
     # Evaluate the PPRF at a point x
     def eval(self, x):
-        key = self.__get_longest_matching_prefix(x)
+        key,_ = self.__get_longest_matching_prefix(x)
         seed = key[KEY_VALUE]
         check_val = key[KEY_PREFIX]
 
