@@ -1,4 +1,4 @@
-# Secure Deletion from Puncturable Psuedorandom Functions
+# Secure Deletion from Puncturable Pseudorandom Functions
 File system with provably secure deletion using cryptographic erasure
 
 # Benchmarking
