@@ -20,7 +20,7 @@ class TestPPRF(unittest.TestCase):
             pprf.puncture(x)
             deletions.append(x)
 
-        for (x,y)in evals:
+        for (x,y) in evals:
             self.assertEqual(y, pprf.eval(x), f'PPRF Evaluation incorrect at point {x}') 
 
         for x in deletions:
