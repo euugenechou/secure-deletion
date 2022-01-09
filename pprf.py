@@ -6,9 +6,11 @@ KEY_VALUE = 2
 
 class PPRF:
 
-    def __init__(self, key):
-        self.iv = secrets.randbits(128)
+    def __init__(self, key, domain_bits, iv=secrets.randbits(128)):
+        assert domain_bits <= 128, "PPRF only supports domain sizes up to 2^128" 
+        self.iv = iv
         self.key = [(0, 0, key)]
+        self.domain_bits = domain_bits
         # Used for length-doubling PRG
         self.inputs = b'\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F'
         self.inputs += b'\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F'
@@ -29,27 +31,25 @@ class PPRF:
         prefix = key[KEY_PREFIX]
         self.key.pop(key_idx)
         new_keys = []
-        for i in range(key[KEY_DEPTH], 128):
+        for i in range(key[KEY_DEPTH], self.domain_bits):
             prg_output = self.__prg(seed)
-            bit = x >> (127 - i) & 1
-            prefix_add = (1 - bit) * (2 ** (127 - i))
+            bit = x >> (self.domain_bits - 1 - i) & 1
+            prefix_add = (1 - bit) * (2 ** (self.domain_bits - 1 - i))
             if bit:
                 seed = prg_output[16:]
-                #bisect.insort(self.key, (prefix + prefix_add, i + 1, prg_output[:16]))
                 bisect.insort(new_keys, (prefix + prefix_add, i + 1, prg_output[:16]))
             else:
                 seed = prg_output[:16]
-                #bisect.insort(self.key, (prefix + prefix_add, i + 1, prg_output[16:]))
                 bisect.insort(new_keys, (prefix + prefix_add, i + 1, prg_output[16:]))
 
-            prefix += bit * (2 ** (127 - i))
+            prefix += bit * (2 ** (self.domain_bits - 1 - i))
 
         self.key[key_idx:key_idx] = new_keys
         return self.key
 
     # Get key that can evaluate the point x
     def __get_longest_matching_prefix(self, x):
-        i = bisect.bisect_left(self.key, (x, 2 ** 128, 2 ** 128))
+        i = bisect.bisect_left(self.key, (x, 2 ** self.domain_bits, 2 ** self.domain_bits))
 
         if i == len(self.key):
             return self.key[i - 1], i - 1
@@ -64,11 +64,11 @@ class PPRF:
         seed = key[KEY_VALUE]
         check_val = key[KEY_PREFIX]
 
-        for i in range(key[KEY_DEPTH], 128):
+        for i in range(key[KEY_DEPTH], self.domain_bits):
             prg_output = self.__prg(seed)
-            if x >> (127 - i) & 1:
+            if x >> (self.domain_bits - 1 - i) & 1:
                 seed = prg_output[16:]
-                check_val += (2 ** (127 - i))
+                check_val += (2 ** (self.domain_bits - 1 - i))
             else:
                 seed = prg_output[:16]
 

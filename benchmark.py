@@ -17,7 +17,7 @@ for d in num_deletions:
         delete_times = []
         eval_times = []
         pprf_key = secrets.token_bytes(16)
-        pprf = PPRF(pprf_key)
+        pprf = PPRF(pprf_key, 128)
         for z in range(0, d):
             start = time.perf_counter()
             pprf.puncture(random.getrandbits(128))
