@@ -16,20 +16,20 @@ class PPRF:
     # Length Doubling PRG
     # Expands 128-bit seed to 256-bit pseudorandom output
     # Uses AES-CTR-128 as a PRF
-    def prg(self, seed):
+    def __prg(self, seed):
         aes = pyaes.AESModeOfOperationCTR(seed, pyaes.Counter(self.iv))
         ciphertext = aes.encrypt(self.inputs)
         return ciphertext
 
     # Punctures the PRF at a point x and returns a new punctured key
     def puncture(self, x):
-        key = self.get_longest_matching_prefix(x)
+        key = self.__get_longest_matching_prefix(x)
         seed = key[KEY_VALUE]
         check_val = key[KEY_PREFIX]
         prefix = key[KEY_PREFIX]
         self.key.remove(key)
         for i in range(key[KEY_DEPTH], 128):
-            prg_output = self.prg(seed)
+            prg_output = self.__prg(seed)
             bit = x >> (127 - i) & 1
             prefix_add = (1 - bit) * (2 ** (127 - i))
             if bit:
@@ -44,7 +44,7 @@ class PPRF:
         return self.key
 
     # Get key that can evaluate the point x
-    def get_longest_matching_prefix(self, x):
+    def __get_longest_matching_prefix(self, x):
         i = bisect.bisect_left(self.key, (x, 2 ** 128, 2 ** 128))
 
         if i == len(self.key):
@@ -56,12 +56,12 @@ class PPRF:
 
     # Evaluate the PPRF at a point x
     def eval(self, x):
-        key = self.get_longest_matching_prefix(x)
+        key = self.__get_longest_matching_prefix(x)
         seed = key[KEY_VALUE]
         check_val = key[KEY_PREFIX]
 
         for i in range(key[KEY_DEPTH], 128):
-            prg_output = self.prg(seed)
+            prg_output = self.__prg(seed)
             if x >> (127 - i) & 1:
                 seed = prg_output[16:]
                 check_val += (2 ** (127 - i))
