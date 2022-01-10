@@ -38,12 +38,18 @@ class PPRF:
             if bit:
                 seed = prg_output[16:]
                 bisect.insort(new_keys, (prefix + prefix_add, i + 1, prg_output[:16]))
+                check_val += (2 ** (self.domain_bits - 1 - i))
             else:
                 seed = prg_output[:16]
                 bisect.insort(new_keys, (prefix + prefix_add, i + 1, prg_output[16:]))
 
             prefix += bit * (2 ** (self.domain_bits - 1 - i))
 
+        # Key was already punctured at this point.
+        if check_val != x:
+            self.key.insert(key_idx, key)
+            return self.key
+ 
         self.key[key_idx:key_idx] = new_keys
         return self.key
 

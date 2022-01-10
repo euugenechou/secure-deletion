@@ -50,6 +50,13 @@ class TestPPRF(unittest.TestCase):
         self.assertEqual(evals[7], pprf.eval(7).hex(), f'PPRF Evaluation incorrect after puncturing at point 7')
 
         self.assertEqual(len(pprf.key), 4, f'Expected PPRF key size of 4 but got {len(pprf.key)}')
+
+        k1 = pprf.key
+        pprf.puncture(6)
+        pprf.puncture(1)
+        k2 = pprf.key
+        self.assertEqual(k1, k2, f'PPRF key was mangled after repeated puncturing of a point')
+
 if __name__ == '__main__':
     unittest.main()
 
