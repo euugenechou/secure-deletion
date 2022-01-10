@@ -7,6 +7,8 @@ import time
 cycles = 10
 num_deletions = [100, 500, 1000, 2500, 5000, 10000]
 
+PPRF_DOMAIN_SIZE = 64
+
 for d in num_deletions:
     mean_key_sizes = []
     mean_delete_times = []
@@ -17,13 +19,13 @@ for d in num_deletions:
         delete_times = []
         eval_times = []
         pprf_key = secrets.token_bytes(16)
-        pprf = PPRF(pprf_key, 128)
+        pprf = PPRF(pprf_key, PPRF_DOMAIN_SIZE)
         for z in range(0, d):
             start = time.perf_counter()
-            pprf.puncture(random.getrandbits(128))
+            pprf.puncture(random.getrandbits(PPRF_DOMAIN_SIZE))
             delete_times.append(time.perf_counter() - start)
             start = time.perf_counter()
-            pprf.eval(random.getrandbits(128))
+            pprf.eval(random.getrandbits(PPRF_DOMAIN_SIZE))
             eval_times.append(time.perf_counter() - start)
 
         print(f"========= (Cycle {i + 1}/{cycles}) 0 to {d} deletions =========")
@@ -34,8 +36,8 @@ for d in num_deletions:
         pprf.key.sort(key=lambda l: l[1])
         support = 0
         key_count = 0
-        while (support / 2 ** 128) < 0.99:
-            support += 2 ** (128 - pprf.key[key_count][1])
+        while (support / 2 ** PPRF_DOMAIN_SIZE) < 0.99:
+            support += 2 ** (PPRF_DOMAIN_SIZE - pprf.key[key_count][1])
             key_count += 1
 
         mean_subkey_sizes.append(key_count)
