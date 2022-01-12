@@ -1,0 +1,68 @@
+Copyright (C) 2018 Kaan Onarlioglu <http://www.onarlioglu.com>
+
+ERASER is free software, please see the file COPYING for details.
+
+=== ERASER device-mapper target                                     ver.2018.02.11
+
+Kernel module for running ERASER instances.
+
+================================================================================
+
+You can get the latest version of this software and more information about
+ERASER on
+
+    http://www.onarlioglu.com/eraser
+
+=== Overview
+
+=== Requirements
+
+    1 - Linux kernel compiled with device-mapper support. If device-mapper is
+    compiled as a module, it must be loaded.
+
+    2 - This module has been built and tested with kernel version 4.7. It may or
+    may not work with different kernel versions.
+
+    3 - The ERASER userland tool to create and run ERASER instances.
+
+=== Build and Install Instructions
+
+    To build in-tree:
+
+    1 - Copy the source file into "<source>/drivers/md/dm-eraser.c".
+
+    2 - Insert the following line into "<source>/drivers/md/Makefile":
+
+        obj-m += dm-eraser.o
+
+    3 - Then follow the usual kernel compilation process.
+
+    To build out-of-tree, simply follow the usual module compilation process.
+    
+=== Usage
+
+    - Users should interact with the ERASER module only through the provided
+      userland tool. Directly using the device-mapper ioctl interface, or the
+      "dmsetup" command line tool may result in incorrect behavior and data
+      loss.
+
+=== Credits
+
+This software is based on the following research work carried out at
+Northeastern University, SecLab.
+
+    Eraser: Your Data Won't Be Back
+    Kaan Onarlioglu, William Robertson, Engin Kirda
+    IEEE European Symposium on Security and Privacy (EuroS&P)
+    London, GB, April 2018
+
+Authors' version of the full paper is available on
+
+    http://www.onarlioglu.com/publications/eurosp2018eraser.pdf
+
+If you would like to acknowledge our research and/or software in your works,
+please use the following citation information:
+
+    http://www.onarlioglu.com/bibtex/eurosp2018eraser.txt
+
+=== EOF
