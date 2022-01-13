@@ -6,8 +6,9 @@ KEY_VALUE = 2
 
 class PPRF:
 
-    def __init__(self, key, domain_bits, iv=secrets.randbits(128)):
+    def __init__(self, key, domain_bits=128, iv=secrets.randbits(128)):
         assert domain_bits <= 128, "PPRF only supports domain sizes up to 2^128" 
+        assert len(key) == 16, "PPRF key must be 16 bytes"
         self.iv = iv
         self.key = [(0, 0, key)]
         self.domain_bits = domain_bits
