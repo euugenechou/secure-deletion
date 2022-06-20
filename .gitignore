@@ -1,1 +1,14 @@
 .DS_Store
+.vscode
+
+**/*.mod
+**/*.mod.c
+**/*.mod.dwo
+**/*.mod.o.cmd
+**/*.o
+**/*.o.cmd
+**/*.ko
+**/*.ko.cmd
+**/*.dwo
+**/Module.symvers
+**/modules.order

@@ -1,4 +1,4 @@
-obj-m := dm-eraser.o
+obj-m := ggm_prf.o
 
 all:
 	make -C ~/Desktop/linux M=$(PWD) modules

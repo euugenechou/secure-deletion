@@ -1629,7 +1629,7 @@ static struct netlink_kernel_cfg eraser_netlink_cfg =
  * Constructor.
  */
 static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
-{
+{	
 	struct eraser_dev *rd;
 	int helper_pid;
 	char dummy;

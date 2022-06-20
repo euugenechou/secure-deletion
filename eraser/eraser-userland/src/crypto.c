@@ -145,7 +145,8 @@ void digest_key(char *in, int in_len, char *out, int out_len, char *salt, int sa
 void init_crypto() {
     ERR_load_crypto_strings();
     OpenSSL_add_all_algorithms();
-    OPENSSL_config(NULL);
+    // OPENSSL_config(NULL);
+    OPENSSL_no_config();
 }
 
 /* Cleans up OpenSSL. */
