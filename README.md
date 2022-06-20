@@ -2,16 +2,16 @@
 Secure data deletion ensures that **deleted files are irrecoverable by an adversary that later obtains physical access to the underlying storage medium**. In this work, we present an novel method for provably secure deletion of files. First, we bootstrap secure deletion by using an external computing resource that the user controls (e.g., a TPM or SmartCard) to store a master key that never persists to disk. Second, we use a *puncturable pseudorandom function* (PPRF) to  generate per-file encryption keys on-the-fly. File access requires only a very efficient PPRF evaluation per file key retrieval and a single disk IO operation. File deletion is also fast, consisting only of an efficient *puncture* operation on the PPRF key and a constant number of symmetric encryptions. As a result, our techniques greatly minimize the disk IO overhead associated with prior approaches to secure deletion. This results in a significant performance improvement in practice. 
 
 ## Puncturable Pseudorandom Functions (PPRF)
-A core ingredient of our techniques is the ability to efficiently generate per-file encryption keys on the fly using a **puncturable pseudorandom function (PPRF)**. Recall that a *pseudorandom function* (PRF) <img src="https://render.githubusercontent.com/render/math?math=F"> is a function that "looks random" to any computationally bounded adversary that is given polynomially many evaluations of <img src="https://render.githubusercontent.com/render/math?math=F_k(\cdot)"> when <img src="https://render.githubusercontent.com/render/math?math=k"> is chosen uniformly at random.
+A core ingredient of our techniques is the ability to efficiently generate per-file encryption keys on the fly using a **puncturable pseudorandom function (PPRF)**. Recall that a *pseudorandom function* (PRF) $F$ is a function that "looks random" to any computationally bounded adversary that is given polynomially many evaluations of $F_k(\cdot)$ when $k$ is chosen uniformly at random.
 
 A puncturable PRF is a pseudorandom function with an additional *puncture* operation defined as:
 
-- <img src="https://render.githubusercontent.com/render/math?math=\text{puncture}(k, x) \rightarrow k^*">, where <img src="https://render.githubusercontent.com/render/math?math=k^*"> is a new *punctured* key for <img src="https://render.githubusercontent.com/render/math?math=F"> such that <img src="https://render.githubusercontent.com/render/math?math=F_{k^*}(x') = F_k(x')"> for all <img src="https://render.githubusercontent.com/render/math?math=x' \ne x">
+- puncture$(k, x) \rightarrow k^\*$, where $k^\*$ is a new *punctured* key for $F$ such that $F_{k^*}(x') = F_k(x')$ for all $x' \ne x$
 
-Additionally, it follows that for any computationally bounded adversary with access to a punctured key <img src="https://render.githubusercontent.com/render/math?math=k^*">, the value <img src="https://render.githubusercontent.com/render/math?math=F_k(x)"> is computationally indistinguishable from random.
+Additionally, it follows that for any computationally bounded adversary with access to a punctured key $k^\*$, the value $F_k(x)$ is computationally indistinguishable from random.
 
 ## Benchmarking
-The following table shows the average PPRF evaluation and puncturing times across **0 - N** puncturing operations for our reference PPRF implementation in `pprf.py`. In each test, the PPRF is initialized and then random points are punctured one at a time up to **N**. 
+The following table shows the average PPRF evaluation and puncturing times across $0 - N$ puncturing operations for our reference PPRF implementation in `pprf.py`. In each test, the PPRF is initialized and then random points are punctured one at a time up to $N$. 
 
 |                           |  0 - 100 |  0 - 500 | 0 - 1,000 | 0 - 2,500 | 0 - 5,000 | 0 - 10,000 |
 |---------------------------|:------:|:------:|:------:|:------:|:------:|:-------:|
