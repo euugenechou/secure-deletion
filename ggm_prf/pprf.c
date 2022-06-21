@@ -4,6 +4,7 @@
 #include <linux/scatterlist.h>
 #include <crypto/rng.h>
 #include <linux/sort.h>
+#include <linux/bsearch.h>
 
 #define PRG_INPUT_LEN 16
 
@@ -21,10 +22,14 @@ struct crypto_blkcipher *tfm;
 #define MAX_DEPTH 56 
 #define NODE_LABEL_LEN 7
 
+struct node_label {
+	u8 bstr[NODE_LABEL_LEN];
+	u8 depth;
+};
+
 struct pprf_key {
     u8 key[PRG_INPUT_LEN];
-    u8 node_label[NODE_LABEL_LEN];
-    u8 depth;
+    struct node_label lbl;
 };
 
 struct pprf_key* master_key;
@@ -67,7 +72,7 @@ void ggm_prf(u8* in, u8* out, struct pprf_key* pkey) {
 
 	memcpy(keycpy, pkey->key, PRG_INPUT_LEN);
 	n = 0;
-	while (n < MAX_DEPTH - pkey->depth) {
+	while (n < MAX_DEPTH - pkey->lbl.depth) {
 		prg_from_aes_ctr(keycpy, tmp);
 		if (check_bit_is_set(in, n)) {
 			memcpy(keycpy, tmp, PRG_INPUT_LEN);
@@ -76,7 +81,7 @@ void ggm_prf(u8* in, u8* out, struct pprf_key* pkey) {
 		}
 // #ifdef DEBUG
 		printk(KERN_INFO "At round %u/%u: tmp = %032ph,\n\t\t bit=%u, next key = %016ph", 
-                n, pkey->depth, tmp, check_bit_is_set(in,n), keycpy);
+                n, pkey->lbl.depth, tmp, check_bit_is_set(in,n), keycpy);
 // #endif
 		++n;
 	}
@@ -89,29 +94,33 @@ int alloc_master_key(void) {
     if (!master_key_count) {
         master_key = kmalloc_array(2000, sizeof(struct pprf_key), GFP_KERNEL);
     }
+	return 0;
 }
 
 void init_pkey_from_buf(struct pprf_key* pkey, u8* key, u8 depth, u8* node_label) {
     memcpy(pkey->key, key, PRG_INPUT_LEN);
-    pkey->depth = depth;
-    memcpy(pkey->node_label, node_label, NODE_LABEL_LEN);
+    pkey->lbl.depth = depth;
+    memcpy(pkey->lbl.bstr, node_label, NODE_LABEL_LEN);
 }
 
-void init_pkey_from_bitstring(struct pprf_key* pkey, u8* key, char* bitstring) {
-	int len;
+void init_node_label_from_bitstring(struct node_label *lbl, const char* bitstring) {
 	int i;
-
-    memcpy(pkey->key, key, PRG_INPUT_LEN);
-	pkey->depth = strlen(bitstring);
-	for (i=0; i<pkey->depth; ++i) {
-		pkey->node_label[i/8] += (bitstring[i] == '1' ? 1 : 0) * (1 << (i%8));
+	memset(lbl->bstr, 0, NODE_LABEL_LEN);
+	lbl->depth = strlen(bitstring);
+	for (i=0; i<lbl->depth; ++i) {
+		lbl->bstr[i/8] += (bitstring[i] == '1' ? 1 : 0) * (1 << (i%8));
 	}
+}
 
+void init_pkey_from_bitstring(struct pprf_key* pkey, u8* key, const char* bitstring) {
+    if (key)
+		memcpy(pkey->key, key, PRG_INPUT_LEN);
+	init_node_label_from_bitstring(&pkey->lbl, bitstring);
 }
 
 void init_pkey_top_level(struct pprf_key* pkey) {
     ggm_prf_get_random_bytes_kernel(pkey->key, PRG_INPUT_LEN);
-    pkey->depth = 0;
+    pkey->lbl.depth = 0;
 }
 
 
@@ -123,25 +132,79 @@ void init_pkey_top_level(struct pprf_key* pkey) {
  * Compare bit by bit and return if any of the bits are different
  * Otherwise, one string will be a prefix of the other
  */
-int compare_pkeys_by_label(struct pprf_key* pk1, struct pprf_key* pk2) {
+int compare_node_labels(const void *p1, const void *p2) {
+	struct node_label *l1, *l2;
 	u8 minlen;
 	u8 i;
 	u8 b1, b2;
 
-	minlen = min(pk1->depth, pk2->depth);
+	l1 = (struct node_label*) p1;
+	l2 = (struct node_label*) p2;
+	minlen = min(l1->depth, l2->depth);
 	for (i=0; i<minlen; ++i) {
-		b1 = check_bit_is_set(pk1->node_label, i);
-		b2 = check_bit_is_set(pk2->node_label, i);
+		b1 = check_bit_is_set(l1->bstr, i);
+		b2 = check_bit_is_set(l2->bstr, i);
 		if (b1 != b2) 
 			return b1 - b2;
 	}
 
-	if (pk1->depth < pk2->depth)
+	if (l1->depth < l2->depth)
 		return -1;
-	if (pk1->depth > pk2->depth)
+	if (l1->depth > l2->depth)
 		return 1;
 	return 0;
 }
+
+int compare_pkeys_by_label(const void* pk1, const void* pk2) {
+	return compare_node_labels(&((struct pprf_key*) pk1)->lbl, &((struct pprf_key*) pk2)->lbl);
+}
+
+int compare_label_to_pkey(const void *l, const void *pk) {
+	return compare_node_labels(l, &((struct pprf_key*) pk)->lbl);
+}
+
+bool is_prefix(struct node_label *lbl, struct node_label *pre) {
+	int i;
+	bool b1, b2;
+
+	if (pre->depth > lbl->depth)
+		return false;
+	for (i=0; i<pre->depth; ++i) {
+		b1 = check_bit_is_set(lbl->bstr, i);
+		b2 = check_bit_is_set(pre->bstr, i);
+		if (b1 != b2) 
+			return false;
+	}
+	return true;
+}
+
+
+
+// puncture operation
+
+struct pprf_key *find_pkey_by_prefix(struct node_label *lbl) {
+	// return (struct pprf_key*) bsearch(lbl, master_key, master_key_count, sizeof(struct pprf_key), &compare_label_to_pkey);
+	int i;
+
+	for (i=0; i<master_key_count; ++i) {
+		if (is_prefix(lbl, &master_key[i].lbl))
+			return master_key+i;
+	}
+	return master_key+master_key_count;
+}
+
+
+
+
+void puncture(struct node_label *lbl) {
+
+	// 1. find root in master key
+
+	// 2. find all neighbors in path
+
+	// 3. insert new keys
+}
+
 
 
 // convenience functions
@@ -150,17 +213,34 @@ int compare_pkeys_by_label(struct pprf_key* pk1, struct pprf_key* pk2) {
 
 // printing functions
 
+void label_to_string(struct node_label *lbl, char* node_label_str) {
+    int i;
+	
+	if (lbl->depth == 0) {
+		node_label_str[0] = '\"';
+		node_label_str[1] = '\"';
+		node_label_str[2] = '\0';
+	} else {
+		for (i=0; i<lbl->depth; ++i) {
+			node_label_str[i] = check_bit_is_set(lbl->bstr, i) ? '1' : '0';
+		}
+		node_label_str[lbl->depth] = '\0';
+	}
+}
+
 void print_pkey(struct pprf_key* pkey) {
     // terrible terrible stringy stuff
     char node_label_str[8*NODE_LABEL_LEN+1];
-    int i;
 
-	memset(node_label_str, '\0', 8*NODE_LABEL_LEN+1);
-    for (i=0; i<pkey->depth; ++i) {
-        node_label_str[i] = check_bit_is_set(pkey->node_label, i) ? '1' : '0';
-    }
-    node_label_str[i] = '\0';
-    printk(KERN_INFO "PPRF KEY: %016ph, label: %s, depth: %d\n", pkey->key, node_label_str, pkey->depth);
+	label_to_string(&pkey->lbl, node_label_str);
+    printk(KERN_INFO "PPRF KEY: %016ph, label: %s, depth: %d\n", pkey->key, node_label_str, pkey->lbl.depth);
+}
+
+void print_label(struct node_label *lbl) {
+	char node_label_str[8*NODE_LABEL_LEN+1];
+
+	label_to_string(lbl, node_label_str);
+    printk(KERN_INFO "NODE LABEL: %s, depth: %d\n", node_label_str, lbl->depth);
 }
 
 
@@ -170,28 +250,28 @@ void print_pkey(struct pprf_key* pkey) {
 
 void test_print_pkey(void) {
 	struct pprf_key pkey;
-	pkey.depth = 8;
-	pkey.node_label[0] = 255;
+	pkey.lbl.depth = 8;
+	pkey.lbl.bstr[0] = 255;
 
 	print_pkey(&pkey);
 	
 }
 
 void test_init_pkey_from_bitstring_and_compare(void) {
-	char *twobitstrings[6] = {"0", "00", "01", "1", "10", "11"};
-	struct pprf_key pkeys[6];
+	char *twobitstrings[7] = {"", "0", "00", "01", "1", "10", "11"};
+	struct pprf_key pkeys[7];
 	u8 n,m;
 	int c;
 	u8 key[PRG_INPUT_LEN];
 
-	for(n=0; n<6; ++n) {
+	for(n=0; n<7; ++n) {
 		ggm_prf_get_random_bytes_kernel(key, PRG_INPUT_LEN);
 		init_pkey_from_bitstring(&pkeys[n], key, twobitstrings[n]);
 		print_pkey(&pkeys[n]);
 	}
 
-	for(n=0; n<6; ++n) {
-		for (m=0; m<6; ++m) {
+	for(n=0; n<7; ++n) {
+		for (m=0; m<7; ++m) {
 			c = compare_pkeys_by_label(&pkeys[n], &pkeys[m]);
 			printk(KERN_INFO "\t Compare: %s %s %s\n", twobitstrings[n], 
 					c ? (c == 1 ? ">" : "<")
@@ -200,17 +280,103 @@ void test_init_pkey_from_bitstring_and_compare(void) {
 	}
 }
 
-
 void test_sort_lexicographic(void) {
+	char *twobitstrings[7] = {"", "0", "00", "01", "1", "10", "11"};
+	struct pprf_key pkeys[7];
+	u8 n;
+	u8 key[PRG_INPUT_LEN];
+
+	u8 order1[7] = {1, 4, 2, 0, 5, 3, 6};
 	
+	printk(KERN_INFO ": Initial order\n");
+	for(n=0; n<7; ++n) {
+		ggm_prf_get_random_bytes_kernel(key, PRG_INPUT_LEN);
+		// printk(KERN_INFO "%s\n", twobitstrings[n]);
+		init_pkey_from_bitstring(&pkeys[n], key, twobitstrings[order1[n]]);
+		print_pkey(&pkeys[n]);
+	}
+
+	sort(pkeys, 7, sizeof(struct pprf_key), &compare_pkeys_by_label, NULL);
+
+	printk(KERN_INFO ": Sorted order\n");
+	for (n=0; n<7; ++n) {
+		print_pkey(&pkeys[n]);
+	}
 }
+
+void test_find_prefix(void) {
+	struct node_label nlbl;
+	init_pkey_from_bitstring(master_key+1, NULL, "0");
+	init_pkey_from_bitstring(master_key+2, NULL, "11");
+	master_key_count = 3;
+
+	init_node_label_from_bitstring(&nlbl, "01");
+
+	struct pprf_key *root = find_pkey_by_prefix(&nlbl);
+	printk(KERN_INFO "ROOT: %p\n", root);
+	if (root)
+		print_pkey(root);
+}
+
+// remember to free the allocated memory
+// char** alloc_and_gen_bitstrings(u8 len) {
+// 	u8 d, i;
+
+// 	char** list = kmalloc_array((1<<len+1)- 1, sizeof(char*), GFP_KERNEL);
+// 	list[0] = kzalloc(1, GFP_KERNEL);
+// 	list[0][0] = '\0';
+// 	for (d=1; d<=len; ++d) {
+// 		for (i=(1<<d)-1; i<(1<<(d+1))-1; i+=2) {
+// 			list[i] = kzalloc(d+1, GFP_KERNEL);
+// 			list[i+1] = kzalloc(d+1, GFP_KERNEL);
+// 			strcpy(list[i], list[(i-1)/2]);
+// 			strcpy(list[i+1], list[(i-1)/2]);
+// 			list[i][d-1]='0';
+// 			list[i+1][d-1]='1';
+// 		}
+// 	}
+
+// 	return list;
+// }
+
+// void test_alloc_and_gen_bitstrings(void) {
+// 	int i;
+// 	char** list;
+	
+// 	list = alloc_and_gen_bitstrings(2);
+// 	printk(KERN_INFO "length 2 strings:");
+// 	for (i=0; i<(1<<(2+1))-1; ++i)
+// 		printk(KERN_CONT " %s,", list[i]);
+// 		kfree(list[i]);
+// 	kfree(list);
+
+// 	list = alloc_and_gen_bitstrings(3);
+// 	printk(KERN_INFO "length 3 strings:");
+// 	for (i=0; i<(1<<(3+1))-1; ++i)
+// 		printk(KERN_CONT " %s,", list[i]);
+// 		kfree(list[i]);
+// 	kfree(list);
+
+// }
+
 
 
 void run_tests(void) {
-	printk(KERN_INFO "running test_print_pkey");
+	printk(KERN_INFO "\n running test_print_pkey\n");
 	test_print_pkey();
-	printk(KERN_INFO "running test_init_pkey_from_bitstring_and_compare");
+	printk(KERN_INFO "\n running test_init_pkey_from_bitstring_and_compare\n");
 	test_init_pkey_from_bitstring_and_compare();
+	printk(KERN_INFO "\n running test_sort_lexicographic\n");
+	test_sort_lexicographic();
+
+	// printk(KERN_INFO "\n running alloc_and_gen_biststrings\n");
+	// test_alloc_and_gen_bitstrings();
+
+	printk(KERN_INFO "\n running test_find_prefix\n");
+	test_find_prefix();
+	
+
+	printk(KERN_INFO "\n tests complete\n");
 
 }
 
