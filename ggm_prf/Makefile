@@ -1,4 +1,4 @@
-obj-m := ggm_prf.o
+obj-m := pprf.o
 
 all:
 	make -C ~/Desktop/linux M=$(PWD) modules

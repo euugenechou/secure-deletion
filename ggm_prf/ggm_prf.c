@@ -49,7 +49,8 @@ void ggm_prf(u8* in, u8* out) {
 	u8 keycpy[PRG_INPUT_LEN];
 	u8 tmp[2*PRG_INPUT_LEN];
 	memcpy(keycpy, key, PRG_INPUT_LEN);
-	u8 n=0;
+	u8 n;
+	n = 0;
 	while (n<8*PRG_INPUT_LEN) {
 		prg_from_aes_ctr(keycpy, tmp);
 		if (check_bit_is_set(in, n)) {
@@ -78,7 +79,8 @@ void test_prg(void) {
 }
 
 void test_check_bit_is_set(void) {
-	u8 tst[2] = "\377\100";
+	// u8 tst[2] = "\377\100";
+	u8 tst[2] = {255, 64};
 	int i=0;
 	printk(KERN_INFO "Begin check bit test:");
 	for (;i<16;++i) {
