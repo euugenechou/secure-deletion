@@ -19,8 +19,10 @@ struct scatterlist sg_in;
 struct crypto_blkcipher *tfm;
 
 // This is arbitrary. it can support 2^56 inodes
-#define MAX_DEPTH 2 
+#define MAX_DEPTH 56 
 #define NODE_LABEL_LEN 7
+
+u8 pprf_depth = 16;
 
 struct node_label {
 	u8 bstr[NODE_LABEL_LEN];
@@ -79,7 +81,7 @@ void ggm_prf(u8* in, u8* out, struct pprf_key* pkey) {
 
 	memcpy(keycpy, pkey->key, PRG_INPUT_LEN);
 	n = 0;
-	while (n < MAX_DEPTH - pkey->lbl.depth) {
+	while (n < pprf_depth - pkey->lbl.depth) {
 		prg_from_aes_ctr(keycpy, tmp);
 		if (check_bit_is_set(in, n)) {
 			memcpy(keycpy, tmp, PRG_INPUT_LEN);
@@ -117,6 +119,16 @@ void init_node_label_from_bitstring(struct node_label *lbl, const char* bitstrin
 	for (i=0; i<lbl->depth; ++i) {
 		set_bit_in_buf(lbl->bstr, i, bitstring[i] == '1');
 		// lbl->bstr[i/8] += (bitstring[i] == '1' ? 1 : 0) * (1 << (i%8));
+	}
+}
+
+// Big endian
+void init_node_label_from_long(struct node_label *lbl, u64 val, u8 depth) {
+	u8 idx;
+
+	lbl->depth = depth;
+	for (idx=0; idx<depth; ++idx) {
+		set_bit_in_buf(lbl->bstr, depth-1-idx, (1<<idx) & val);
 	}
 }
 
@@ -202,16 +214,13 @@ int find_pkey_index_by_prefix(struct node_label *lbl) {
 }
 
 
-
-
 void puncture(struct node_label *lbl) {
-
 	// 1. find root in master key
 	int i = find_pkey_index_by_prefix(lbl);
 	struct pprf_key *root = &master_key[i];
 
 	// 2. find all neighbors in path
-	int neighbors_cnt = MAX_DEPTH - root->lbl.depth; 
+	int neighbors_cnt = pprf_depth - root->lbl.depth; 
 	struct pprf_key newpkeys[neighbors_cnt];
 
 	u8 keycpy[PRG_INPUT_LEN];
@@ -221,7 +230,7 @@ void puncture(struct node_label *lbl) {
 
 	memcpy(keycpy, root->key, PRG_INPUT_LEN);
 	n = root->lbl.depth;
-	while (n < MAX_DEPTH) {
+	while (n < pprf_depth) {
 		prg_from_aes_ctr(keycpy, tmp);
 		set = check_bit_is_set(lbl->bstr, n);
 		if (set) {
@@ -244,6 +253,46 @@ void puncture(struct node_label *lbl) {
 	master_key_count += neighbors_cnt - 1;
 }
 
+void puncture_at_tag(u64 tag) {
+	struct node_label lbl;
+	init_node_label_from_long(&lbl, tag, pprf_depth);
+	puncture(&lbl);
+}
+
+
+/* PPRF evaluation
+ * 	Returns -1 if the tag has been punctured
+ * 	Otherwise returns 0 and out should be filled with the 
+ * 	evaluation of PPRF(tag)
+ */
+int evaluate_at_tag(u64 tag, u8* out) {
+	struct node_label lbl;
+	init_node_label_from_long(&lbl, tag, pprf_depth);
+
+	int keyidx = find_pkey_index_by_prefix(&lbl);
+	if (keyidx == master_key_count) 
+		return -1;
+
+	u8 keycpy[PRG_INPUT_LEN];
+	u8 tmp[2*PRG_INPUT_LEN];
+	bool set;
+	memcpy(keycpy, master_key[keyidx].key, PRG_INPUT_LEN);
+
+	int n = master_key[keyidx].lbl.depth;
+	// printk(KERN_INFO "Begin eval: \n");
+	for (; n<pprf_depth; ++n) {
+		// printk(KERN_CONT " %u\n", n);
+		prg_from_aes_ctr(keycpy, tmp);
+		set = check_bit_is_set(lbl.bstr, n);
+		if (set) {
+			memcpy(keycpy, tmp, PRG_INPUT_LEN);
+		} else {
+			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
+		}
+	}
+	memcpy(out, keycpy, PRG_INPUT_LEN);
+	return 0;
+}
 
 
 // convenience functions
@@ -272,7 +321,8 @@ void print_pkey(struct pprf_key* pkey) {
     char node_label_str[8*NODE_LABEL_LEN+1];
 
 	label_to_string(&pkey->lbl, node_label_str);
-    printk(KERN_INFO "PPRF KEY: %016ph, label: %s, depth: %d\n", pkey->key, node_label_str, pkey->lbl.depth);
+    printk(KERN_INFO "PPRF KEY: %016ph, label: %s, depth: %d\n"
+				, pkey->key, node_label_str, pkey->lbl.depth);
 }
 
 void print_label(struct node_label *lbl) {
@@ -367,13 +417,14 @@ void test_find_prefix(void) {
 		print_pkey(root);
 }
 
-
 void test_puncture_0(void) {
 	struct node_label punct_node;
 
-	init_pkey_top_level(master_key);
+	init_pkey_top_level(&master_key[0]);
 	master_key_count = 1;
 	print_master_key();
+	printk(KERN_INFO "Setting pprf depth = 2\n");
+	pprf_depth = 2;
 
 	printk(KERN_INFO "Puncturing 10...\n");
 	init_node_label_from_bitstring(&punct_node, "10");
@@ -382,7 +433,7 @@ void test_puncture_0(void) {
 
 	printk(" ... resetting...\n");
 
-	init_pkey_top_level(master_key);
+	init_pkey_top_level(&master_key[0]);
 	master_key_count = 1;
 	print_master_key();
 
@@ -395,10 +446,65 @@ void test_puncture_0(void) {
 	init_node_label_from_bitstring(&punct_node, "10");
 	puncture(&punct_node);
 	print_master_key();
-
-
 }
 
+void test_puncture_1(void) {
+	struct node_label punct_node;
+
+	init_pkey_top_level(&master_key[0]);
+	master_key_count = 1;
+	print_master_key();
+	printk(KERN_INFO "Setting pprf depth = 16\n");
+	pprf_depth = 16;
+
+	printk(KERN_INFO "Puncturing tag=0...\n");
+	init_node_label_from_long(&punct_node, 0, pprf_depth);
+	puncture(&punct_node);
+	print_master_key();
+
+	printk(KERN_INFO "Puncturing tag=1...\n");
+	init_node_label_from_long(&punct_node, 1, pprf_depth);
+	puncture(&punct_node);
+	print_master_key();
+
+	printk(KERN_INFO "Puncturing tag=2...\n");
+	init_node_label_from_long(&punct_node, 2, pprf_depth);
+	puncture(&punct_node);
+	print_master_key();
+
+	printk(KERN_INFO "Puncturing tag=65535...\n");
+	init_node_label_from_long(&punct_node, (1<<16)-1, pprf_depth);
+	puncture(&punct_node);
+	print_master_key();
+}
+
+
+void test_evaluate_0(void) {
+	init_pkey_top_level(&master_key[0]);
+	master_key_count = 1;
+	print_master_key();
+	printk(KERN_INFO "Setting pprf depth = 16\n");
+	pprf_depth = 16;
+
+	int r;
+
+	u8 out[PRG_INPUT_LEN];
+	r = evaluate_at_tag(0, out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(255, out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+
+	printk(KERN_INFO "Puncturing tag=1...\n");
+	puncture_at_tag(1);
+	print_master_key();
+
+	r = evaluate_at_tag(0, out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(1, out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(255, out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+}
 
 void run_tests(void) {
 	printk(KERN_INFO "\n running test_print_pkey\n");
@@ -408,14 +514,16 @@ void run_tests(void) {
 	printk(KERN_INFO "\n running test_sort_lexicographic\n");
 	test_sort_lexicographic();
 
-	// printk(KERN_INFO "\n running alloc_and_gen_biststrings\n");
-	// test_alloc_and_gen_bitstrings();
-
 	printk(KERN_INFO "\n running test_find_prefix\n");
 	test_find_prefix();
 	
 	printk(KERN_INFO "\n running test_puncture_0\n");
-	test_puncture_0();
+	test_puncture_0();	
+	printk(KERN_INFO "\n running test_puncture_1\n");
+	test_puncture_1();
+
+	printk(KERN_INFO "\n running test_evaluate_0\n");
+	test_evaluate_0();
 
 	printk(KERN_INFO "\n tests complete\n");
 
