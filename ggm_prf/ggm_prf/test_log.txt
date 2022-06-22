@@ -1,0 +1,237 @@
+
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.023578] ggm pprf testing module loaded.
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.023578] IV = 33 b9 9b f4 b0 f8 01 f1 a6 14 ea 53 4d 21 2c 9a
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.032652] PPRF KEY: 2b 50 95 77 76 79 21 e0 d2 1b 14 9b b2 a5 18 52, label: "", depth: 0
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.040611] 
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.040611]  running test_print_pkey
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.047692] PPRF KEY: 20 00 00 00 00 00 00 00 00 07 00 00 00 00 00 00, label: 11111111, depth: 8
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.056508] 
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.056508]  running test_init_pkey_from_bitstring_and_compare
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.068807] PPRF KEY: b7 cf a3 1f 41 1a b4 3c a7 d9 84 1e cf 8a e7 4b, label: "", depth: 0
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.078863] PPRF KEY: ad 3a 99 8b 17 1d ea 36 f5 d8 67 24 71 23 9f bc, label: 0, depth: 1
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.091511] PPRF KEY: 61 ba 36 53 84 56 53 9e c1 f8 a8 e1 b5 fd 50 6c, label: 00, depth: 2
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.103023] PPRF KEY: 01 85 f3 66 56 21 ac b3 e4 ed 9d 1b 8d f3 77 fc, label: 01, depth: 2
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.112659] PPRF KEY: 40 30 27 8d cc 2e b7 1b 65 27 e1 c3 14 75 a2 24, label: 1, depth: 1
+Jun 22 16:47:00 wittmann-VirtualBox kernel: [   63.121071] PPRF KEY: 4f 8d 7a 8f 1a 01 73 6c 58 97 bb 65 55 f2 cf 98, label: 10, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.130933] PPRF KEY: c3 06 92 8b a0 35 e8 5b b6 61 05 a0 a6 c0 e7 89, label: 11, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.139203] 	 Compare:  = 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.142127] 	 Compare:  < 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.145013] 	 Compare:  < 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.147961] 	 Compare:  < 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.151604] 	 Compare:  < 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.154789] 	 Compare:  < 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.158198] 	 Compare:  < 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.162543] 	 Compare: 0 > 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.165565] 	 Compare: 0 = 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.168607] 	 Compare: 0 < 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.171764] 	 Compare: 0 < 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.174888] 	 Compare: 0 < 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.177991] 	 Compare: 0 < 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.181415] 	 Compare: 0 < 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.184599] 	 Compare: 00 > 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.187601] 	 Compare: 00 > 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.191838] 	 Compare: 00 = 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.194789] 	 Compare: 00 < 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.197885] 	 Compare: 00 < 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.200880] 	 Compare: 00 < 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.203852] 	 Compare: 00 < 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.206927] 	 Compare: 01 > 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.210588] 	 Compare: 01 > 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.215095] 	 Compare: 01 > 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.219082] 	 Compare: 01 = 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.224321] 	 Compare: 01 < 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.228123] 	 Compare: 01 < 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.231791] 	 Compare: 01 < 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.236120] 	 Compare: 1 > 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.239091] 	 Compare: 1 > 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.243533] 	 Compare: 1 > 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.248438] 	 Compare: 1 > 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.253340] 	 Compare: 1 = 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.257108] 	 Compare: 1 < 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.260457] 	 Compare: 1 < 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.263409] 	 Compare: 10 > 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.266377] 	 Compare: 10 > 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.269433] 	 Compare: 10 > 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.272684] 	 Compare: 10 > 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.276028] 	 Compare: 10 > 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.279098] 	 Compare: 10 = 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.282850] 	 Compare: 10 < 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.285885] 	 Compare: 11 > 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.288909] 	 Compare: 11 > 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.292089] 	 Compare: 11 > 00
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.295160] 	 Compare: 11 > 01
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.298285] 	 Compare: 11 > 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.301302] 	 Compare: 11 > 10
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.304854] 	 Compare: 11 = 11
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.309127] 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.309127]  running test_sort_lexicographic
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.315842] : Initial order
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.326593] PPRF KEY: 2b 27 c1 c7 d1 a6 73 a8 bd 0a 19 38 44 71 f1 48, label: 0, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.336498] PPRF KEY: 06 4e 73 68 1c d0 25 07 c9 8f 71 47 ca e1 7d ef, label: 1, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.344908] PPRF KEY: 4e 9b c8 d5 8a 78 b7 ab 1a 24 99 c6 09 12 2a 43, label: 00, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.353078] PPRF KEY: 96 16 69 e7 95 45 ec c5 a5 3b 11 a8 bc d0 19 63, label: "", depth: 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.361892] PPRF KEY: 86 83 fd d2 54 8a ba ca 29 65 00 46 42 2d bc 7a, label: 10, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.372643] PPRF KEY: 61 84 b6 a5 2b a7 17 09 36 93 c8 29 11 01 b3 13, label: 01, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.382070] PPRF KEY: f3 25 db fe bb 60 90 64 83 40 4e 73 4b d0 46 2a, label: 11, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.390083] : Sorted order
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.394077] PPRF KEY: 96 16 69 e7 95 45 ec c5 a5 3b 11 a8 bc d0 19 63, label: "", depth: 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.402292] PPRF KEY: 2b 27 c1 c7 d1 a6 73 a8 bd 0a 19 38 44 71 f1 48, label: 0, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.410318] PPRF KEY: 4e 9b c8 d5 8a 78 b7 ab 1a 24 99 c6 09 12 2a 43, label: 00, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.418124] PPRF KEY: 61 84 b6 a5 2b a7 17 09 36 93 c8 29 11 01 b3 13, label: 01, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.426254] PPRF KEY: 06 4e 73 68 1c d0 25 07 c9 8f 71 47 ca e1 7d ef, label: 1, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.435211] PPRF KEY: 86 83 fd d2 54 8a ba ca 29 65 00 46 42 2d bc 7a, label: 10, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.443328] PPRF KEY: f3 25 db fe bb 60 90 64 83 40 4e 73 4b d0 46 2a, label: 11, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.451034] 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.451034]  running test_find_prefix
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.456227] ROOT: ffff88007a4a0000
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.459957] PPRF KEY: 2b 50 95 77 76 79 21 e0 d2 1b 14 9b b2 a5 18 52, label: 0, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.468997] 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.468997]  running test_puncture_0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.477790] : Master key dump START:
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.482316] PPRF KEY: b3 ff f8 96 f2 bb 2c 61 1d fb 79 bc a1 ad 24 29, label: "", depth: 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.490496] : END Master key dump
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.494008] Setting pprf depth = 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.497632] Puncturing 10...
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.500721] : Master key dump START:
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.505860] PPRF KEY: a3 bb 96 d4 70 e5 b5 56 25 db d6 75 49 5e 6a 25, label: 0, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.517332] PPRF KEY: 91 45 b9 69 ba bd d7 97 d6 23 d5 1b d3 d3 25 61, label: 11, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.527567] : END Master key dump
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.533301]  ... resetting...
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.574461] : Master key dump START:
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.579849] PPRF KEY: a6 ec 9a 66 95 cd 5c ee 0b 32 15 44 cc 5b 50 30, label: "", depth: 0
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.595468] : END Master key dump
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.600265] Puncturing 01...
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.604788] : Master key dump START:
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.610479] PPRF KEY: cf 22 ce e4 68 f1 0f 82 f9 e0 0b b6 30 10 9d 9d, label: 00, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.622168] PPRF KEY: f9 77 c5 b1 06 98 90 d4 3b 45 56 b1 1a c3 c3 85, label: 1, depth: 1
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.634714] : END Master key dump
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.640183] Puncturing 10...
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.644824] : Master key dump START:
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.650459] PPRF KEY: cf 22 ce e4 68 f1 0f 82 f9 e0 0b b6 30 10 9d 9d, label: 00, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.663173] PPRF KEY: 75 dd 46 30 e5 2e 90 9b 85 0b 37 88 3c 31 3c 87, label: 11, depth: 2
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.675694] : END Master key dump
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.681240] 
+Jun 22 16:47:01 wittmann-VirtualBox kernel: [   63.681240]  running test_puncture_1
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.691100] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.696939] PPRF KEY: 2e c6 9c 5a 50 8e 41 08 21 3c 02 32 59 af 09 6e, label: "", depth: 0
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.710206] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.715254] Setting pprf depth = 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.720363] Puncturing tag=0...
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.725777] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.732093] PPRF KEY: d6 86 16 bd d9 a5 b9 35 38 d6 01 9e f9 ff 5a f2, label: 0000000000000001, depth: 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.746082] PPRF KEY: a4 69 d0 7d c9 43 e0 f9 ee 90 15 dc 01 f6 14 31, label: 000000000000001, depth: 15
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.756160] PPRF KEY: 54 69 30 5e ba 7c 40 96 c3 cc 39 d1 5c ce 2f e6, label: 00000000000001, depth: 14
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.766482] PPRF KEY: b6 13 49 24 de 37 e4 a9 e3 56 c2 da 94 af 32 6d, label: 0000000000001, depth: 13
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.777150] PPRF KEY: 34 b6 2a 5f 35 e9 93 7f 6d b5 7d 71 4a b7 87 13, label: 000000000001, depth: 12
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.786940] PPRF KEY: c7 42 8b de 4b d3 09 8e 1c f7 43 e0 13 96 54 89, label: 00000000001, depth: 11
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.797143] PPRF KEY: f3 4b 47 29 ee 8a 21 24 d7 56 c8 d3 23 52 bf 1c, label: 0000000001, depth: 10
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.806573] PPRF KEY: 08 2f 06 3b 65 dc c3 63 dc f7 0a 9a 72 77 0d de, label: 000000001, depth: 9
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.815510] PPRF KEY: a5 0c 50 40 9b 6a 8d 4d 61 27 3c 06 b9 8e f6 eb, label: 00000001, depth: 8
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.825234] PPRF KEY: 10 24 f3 64 ec 32 55 1c 9e 5b d3 7d ba 21 88 13, label: 0000001, depth: 7
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.834291] PPRF KEY: 8e 23 41 38 d5 b5 9d fe a7 41 45 0a 49 08 e4 43, label: 000001, depth: 6
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.843356] PPRF KEY: 67 c7 d5 c5 50 22 48 cd 29 ff 71 d3 33 e2 fe 78, label: 00001, depth: 5
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.854387] PPRF KEY: 10 d3 2f bd 9f c0 84 72 3e 72 51 06 8d 1e a8 2e, label: 0001, depth: 4
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.867099] PPRF KEY: 32 6b dd 3e bc 5e a9 68 e8 4d dd 97 7f 42 3a be, label: 001, depth: 3
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.876475] PPRF KEY: 77 07 5f 41 c6 34 70 0d 87 f4 69 c5 71 16 94 c7, label: 01, depth: 2
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.885208] PPRF KEY: c5 ae 85 6b 6e 89 21 e4 41 33 3c 68 03 dc c0 b4, label: 1, depth: 1
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.896413] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.900674] Puncturing tag=1...
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.904853] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.909475] PPRF KEY: a4 69 d0 7d c9 43 e0 f9 ee 90 15 dc 01 f6 14 31, label: 000000000000001, depth: 15
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.919575] PPRF KEY: 54 69 30 5e ba 7c 40 96 c3 cc 39 d1 5c ce 2f e6, label: 00000000000001, depth: 14
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.929335] PPRF KEY: b6 13 49 24 de 37 e4 a9 e3 56 c2 da 94 af 32 6d, label: 0000000000001, depth: 13
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.938895] PPRF KEY: 34 b6 2a 5f 35 e9 93 7f 6d b5 7d 71 4a b7 87 13, label: 000000000001, depth: 12
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.948157] PPRF KEY: c7 42 8b de 4b d3 09 8e 1c f7 43 e0 13 96 54 89, label: 00000000001, depth: 11
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.957506] PPRF KEY: f3 4b 47 29 ee 8a 21 24 d7 56 c8 d3 23 52 bf 1c, label: 0000000001, depth: 10
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.966829] PPRF KEY: 08 2f 06 3b 65 dc c3 63 dc f7 0a 9a 72 77 0d de, label: 000000001, depth: 9
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.975915] PPRF KEY: a5 0c 50 40 9b 6a 8d 4d 61 27 3c 06 b9 8e f6 eb, label: 00000001, depth: 8
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.986686] PPRF KEY: 10 24 f3 64 ec 32 55 1c 9e 5b d3 7d ba 21 88 13, label: 0000001, depth: 7
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   63.999702] PPRF KEY: 8e 23 41 38 d5 b5 9d fe a7 41 45 0a 49 08 e4 43, label: 000001, depth: 6
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.010558] PPRF KEY: 67 c7 d5 c5 50 22 48 cd 29 ff 71 d3 33 e2 fe 78, label: 00001, depth: 5
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.020788] PPRF KEY: 10 d3 2f bd 9f c0 84 72 3e 72 51 06 8d 1e a8 2e, label: 0001, depth: 4
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.029137] PPRF KEY: 32 6b dd 3e bc 5e a9 68 e8 4d dd 97 7f 42 3a be, label: 001, depth: 3
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.037497] PPRF KEY: 77 07 5f 41 c6 34 70 0d 87 f4 69 c5 71 16 94 c7, label: 01, depth: 2
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.046014] PPRF KEY: c5 ae 85 6b 6e 89 21 e4 41 33 3c 68 03 dc c0 b4, label: 1, depth: 1
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.054338] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.057873] Puncturing tag=2...
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.061149] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.064645] PPRF KEY: 36 8d 78 d8 70 39 02 16 9d 98 e6 66 77 1c 5e b7, label: 0000000000000011, depth: 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.076093] PPRF KEY: 54 69 30 5e ba 7c 40 96 c3 cc 39 d1 5c ce 2f e6, label: 00000000000001, depth: 14
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.086393] PPRF KEY: b6 13 49 24 de 37 e4 a9 e3 56 c2 da 94 af 32 6d, label: 0000000000001, depth: 13
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.095680] PPRF KEY: 34 b6 2a 5f 35 e9 93 7f 6d b5 7d 71 4a b7 87 13, label: 000000000001, depth: 12
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.104076] PPRF KEY: c7 42 8b de 4b d3 09 8e 1c f7 43 e0 13 96 54 89, label: 00000000001, depth: 11
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.115008] PPRF KEY: f3 4b 47 29 ee 8a 21 24 d7 56 c8 d3 23 52 bf 1c, label: 0000000001, depth: 10
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.126364] PPRF KEY: 08 2f 06 3b 65 dc c3 63 dc f7 0a 9a 72 77 0d de, label: 000000001, depth: 9
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.140636] PPRF KEY: a5 0c 50 40 9b 6a 8d 4d 61 27 3c 06 b9 8e f6 eb, label: 00000001, depth: 8
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.149359] PPRF KEY: 10 24 f3 64 ec 32 55 1c 9e 5b d3 7d ba 21 88 13, label: 0000001, depth: 7
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.158282] PPRF KEY: 8e 23 41 38 d5 b5 9d fe a7 41 45 0a 49 08 e4 43, label: 000001, depth: 6
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.168704] PPRF KEY: 67 c7 d5 c5 50 22 48 cd 29 ff 71 d3 33 e2 fe 78, label: 00001, depth: 5
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.177372] PPRF KEY: 10 d3 2f bd 9f c0 84 72 3e 72 51 06 8d 1e a8 2e, label: 0001, depth: 4
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.185994] PPRF KEY: 32 6b dd 3e bc 5e a9 68 e8 4d dd 97 7f 42 3a be, label: 001, depth: 3
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.194495] PPRF KEY: 77 07 5f 41 c6 34 70 0d 87 f4 69 c5 71 16 94 c7, label: 01, depth: 2
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.202665] PPRF KEY: c5 ae 85 6b 6e 89 21 e4 41 33 3c 68 03 dc c0 b4, label: 1, depth: 1
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.212202] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.215876] Puncturing tag=65535...
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.220624] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.224440] PPRF KEY: 36 8d 78 d8 70 39 02 16 9d 98 e6 66 77 1c 5e b7, label: 0000000000000011, depth: 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.236929] PPRF KEY: 54 69 30 5e ba 7c 40 96 c3 cc 39 d1 5c ce 2f e6, label: 00000000000001, depth: 14
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.247125] PPRF KEY: b6 13 49 24 de 37 e4 a9 e3 56 c2 da 94 af 32 6d, label: 0000000000001, depth: 13
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.258274] PPRF KEY: 34 b6 2a 5f 35 e9 93 7f 6d b5 7d 71 4a b7 87 13, label: 000000000001, depth: 12
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.267588] PPRF KEY: c7 42 8b de 4b d3 09 8e 1c f7 43 e0 13 96 54 89, label: 00000000001, depth: 11
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.276774] PPRF KEY: f3 4b 47 29 ee 8a 21 24 d7 56 c8 d3 23 52 bf 1c, label: 0000000001, depth: 10
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.285967] PPRF KEY: 08 2f 06 3b 65 dc c3 63 dc f7 0a 9a 72 77 0d de, label: 000000001, depth: 9
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.295467] PPRF KEY: a5 0c 50 40 9b 6a 8d 4d 61 27 3c 06 b9 8e f6 eb, label: 00000001, depth: 8
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.304010] PPRF KEY: 10 24 f3 64 ec 32 55 1c 9e 5b d3 7d ba 21 88 13, label: 0000001, depth: 7
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.313177] PPRF KEY: 8e 23 41 38 d5 b5 9d fe a7 41 45 0a 49 08 e4 43, label: 000001, depth: 6
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.327245] PPRF KEY: 67 c7 d5 c5 50 22 48 cd 29 ff 71 d3 33 e2 fe 78, label: 00001, depth: 5
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.336941] PPRF KEY: 10 d3 2f bd 9f c0 84 72 3e 72 51 06 8d 1e a8 2e, label: 0001, depth: 4
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.345914] PPRF KEY: 32 6b dd 3e bc 5e a9 68 e8 4d dd 97 7f 42 3a be, label: 001, depth: 3
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.354187] PPRF KEY: 77 07 5f 41 c6 34 70 0d 87 f4 69 c5 71 16 94 c7, label: 01, depth: 2
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.363061] PPRF KEY: 90 82 19 b7 f6 cf c9 3e b4 1e ed 83 e0 2e f2 12, label: 10, depth: 2
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.371356] PPRF KEY: 4d 03 8d 85 5d 80 c2 c8 5b 4f 34 8b c7 ad 5f 21, label: 110, depth: 3
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.382616] PPRF KEY: 65 1e 68 3c 1e b6 7e ba 8c 59 95 48 91 76 29 b6, label: 1110, depth: 4
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.391367] PPRF KEY: 21 91 25 19 52 83 0e 27 e9 98 a2 a6 22 9f 1c c3, label: 11110, depth: 5
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.400503] PPRF KEY: cd f3 6e 8c c9 e7 f4 ac 2e c8 44 0f b5 b9 1e 33, label: 111110, depth: 6
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.411668] PPRF KEY: 94 37 a7 7b b9 9f 64 f9 aa f2 ae 8e 80 ba fe 35, label: 1111110, depth: 7
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.420538] PPRF KEY: 04 d1 19 bd a1 e5 17 88 bf 3b 3d 86 49 9f cd eb, label: 11111110, depth: 8
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.429864] PPRF KEY: 0c 8b 50 7a d7 cf 54 00 ee 03 b0 0e b1 5c 1c 6a, label: 111111110, depth: 9
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.440847] PPRF KEY: b3 fd 64 85 d9 13 ad fa dc 69 41 e9 0d 45 6a e7, label: 1111111110, depth: 10
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.452467] PPRF KEY: b9 d6 b8 5f 9e 7a 6e de 7c d4 59 26 cc 6d 09 9f, label: 11111111110, depth: 11
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.463251] PPRF KEY: fd 13 bf eb 8c b3 4e 81 05 f6 c2 e5 74 72 84 ec, label: 111111111110, depth: 12
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.473650] PPRF KEY: 1a e6 7e 8c 4c b8 5e a7 53 9c da 30 2f 1a f5 4d, label: 1111111111110, depth: 13
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.485645] PPRF KEY: 60 39 92 df 94 f6 b8 e1 e2 99 05 a3 5e 59 ae a6, label: 11111111111110, depth: 14
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.497307] PPRF KEY: f1 ce 2e 35 53 4c 90 e5 76 90 dc d0 2d bd d4 ce, label: 111111111111110, depth: 15
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.508249] PPRF KEY: 36 30 03 1b 48 76 85 c0 fc e5 ac bb ba 61 6f 9b, label: 1111111111111110, depth: 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.517898] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.521321] 
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.521321]  running test_evaluate_0
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.533367] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.537727] PPRF KEY: 7a 80 d8 53 10 4b 04 e1 ac bf 61 38 37 bf 99 bc, label: "", depth: 0
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.548404] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.552369] Setting pprf depth = 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.556218] Evaluation at tag 0: SUCCESS (42 b5 d1 a9 82 8d 7d 57 b4 12 99 b4 7b d1 53 05)
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.569040] Evaluation at tag 255: SUCCESS (d7 12 b7 06 d7 64 35 eb 56 79 b6 ce a9 61 06 37)
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.582278] Puncturing tag=1...
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.585623] : Master key dump START:
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.589294] PPRF KEY: 42 b5 d1 a9 82 8d 7d 57 b4 12 99 b4 7b d1 53 05, label: 0000000000000000, depth: 16
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.599080] PPRF KEY: 7b 44 eb 67 3f 1a b0 ff 16 16 30 b3 9d 61 c4 6f, label: 000000000000001, depth: 15
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.609460] PPRF KEY: c8 6b f0 aa 42 14 98 f6 af 13 92 cb 24 33 98 cc, label: 00000000000001, depth: 14
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.619713] PPRF KEY: ff fd 4d 4d ab c9 d6 d6 e4 93 f7 00 af 66 bf dd, label: 0000000000001, depth: 13
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.629749] PPRF KEY: 19 9f aa 5b 99 b4 4e d0 45 4e 5e ee 78 da 03 0f, label: 000000000001, depth: 12
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.639890] PPRF KEY: 53 b0 42 35 6e c2 90 73 c7 30 6f 33 fb e2 2a 60, label: 00000000001, depth: 11
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.650190] PPRF KEY: 30 2e d5 f7 93 db fd 53 84 87 ce c1 6b 0a e4 f0, label: 0000000001, depth: 10
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.661725] PPRF KEY: 0f 7d 7b 8c e0 75 be 77 ec 52 cd d1 16 8a 3e 75, label: 000000001, depth: 9
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.671281] PPRF KEY: 8a 50 6b da a5 fa 60 a7 b8 2d 64 1b e2 f8 71 b8, label: 00000001, depth: 8
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.683237] PPRF KEY: a2 2e 54 a2 65 06 41 1f 29 a4 e8 e1 59 a6 23 cb, label: 0000001, depth: 7
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.693697] PPRF KEY: 7a 82 7f 67 66 fe 85 f9 83 b5 f0 f0 4f f9 2d c4, label: 000001, depth: 6
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.706283] PPRF KEY: 2d e4 1e d0 df a4 d5 7c 8c f0 c9 44 0a ba 40 92, label: 00001, depth: 5
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.715189] PPRF KEY: d1 98 da 1f 0f 8f 9a 0f f2 9d 5f 5c 30 38 b9 1a, label: 0001, depth: 4
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.724400] PPRF KEY: 1c ab 4c d3 5b 1d 97 6a 61 f1 df a0 42 8e 81 f5, label: 001, depth: 3
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.733275] PPRF KEY: 9d 8d 1c 88 c4 3c f8 ed 9b 7f dc 11 4d 75 fe ad, label: 01, depth: 2
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.741953] PPRF KEY: 19 3f 15 2a c5 fe f7 6e c0 e7 4f 89 17 81 59 f4, label: 1, depth: 1
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.750570] : END Master key dump
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.754033] Evaluation at tag 0: SUCCESS (42 b5 d1 a9 82 8d 7d 57 b4 12 99 b4 7b d1 53 05)
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.762239] Evaluation at tag 1: PUNCTURED (42 b5 d1 a9 82 8d 7d 57 b4 12 99 b4 7b d1 53 05)
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.771367] Evaluation at tag 255: SUCCESS (d7 12 b7 06 d7 64 35 eb 56 79 b6 ce a9 61 06 37)
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.783268] 
+Jun 22 16:47:02 wittmann-VirtualBox kernel: [   64.783268]  tests complete
