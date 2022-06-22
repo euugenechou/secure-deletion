@@ -19,7 +19,7 @@ struct scatterlist sg_in;
 struct crypto_blkcipher *tfm;
 
 // This is arbitrary. it can support 2^56 inodes
-#define MAX_DEPTH 56 
+#define MAX_DEPTH 2 
 #define NODE_LABEL_LEN 7
 
 struct node_label {
@@ -36,7 +36,7 @@ struct pprf_key* master_key;
 int master_key_count; // how many individual keys make up the master key
 
 
-
+void print_pkey(struct pprf_key* pkey);
 
 /* Returns crypto-safe random bytes from kernel pool. 
    Taken from eraser code */
@@ -63,6 +63,13 @@ int prg_from_aes_ctr(u8* key, u8* buf) {
 
 bool check_bit_is_set(u8* buf, u8 index) {
 	return buf[index/8] & (1 << (index%8));
+}
+
+void set_bit_in_buf(u8* buf, u8 index, bool val) {
+	if (val)
+		buf[index/8] |= (1 << (index%8));
+	else
+		buf[index/8] &= ((u8)-1) - (1 << (index%8));
 }
 
 void ggm_prf(u8* in, u8* out, struct pprf_key* pkey) {
@@ -108,7 +115,8 @@ void init_node_label_from_bitstring(struct node_label *lbl, const char* bitstrin
 	memset(lbl->bstr, 0, NODE_LABEL_LEN);
 	lbl->depth = strlen(bitstring);
 	for (i=0; i<lbl->depth; ++i) {
-		lbl->bstr[i/8] += (bitstring[i] == '1' ? 1 : 0) * (1 << (i%8));
+		set_bit_in_buf(lbl->bstr, i, bitstring[i] == '1');
+		// lbl->bstr[i/8] += (bitstring[i] == '1' ? 1 : 0) * (1 << (i%8));
 	}
 }
 
@@ -182,15 +190,15 @@ bool is_prefix(struct node_label *lbl, struct node_label *pre) {
 
 // puncture operation
 
-struct pprf_key *find_pkey_by_prefix(struct node_label *lbl) {
+int find_pkey_index_by_prefix(struct node_label *lbl) {
 	// return (struct pprf_key*) bsearch(lbl, master_key, master_key_count, sizeof(struct pprf_key), &compare_label_to_pkey);
 	int i;
 
 	for (i=0; i<master_key_count; ++i) {
 		if (is_prefix(lbl, &master_key[i].lbl))
-			return master_key+i;
+			return i;
 	}
-	return master_key+master_key_count;
+	return master_key_count;
 }
 
 
@@ -199,10 +207,41 @@ struct pprf_key *find_pkey_by_prefix(struct node_label *lbl) {
 void puncture(struct node_label *lbl) {
 
 	// 1. find root in master key
+	int i = find_pkey_index_by_prefix(lbl);
+	struct pprf_key *root = &master_key[i];
 
 	// 2. find all neighbors in path
+	int neighbors_cnt = MAX_DEPTH - root->lbl.depth; 
+	struct pprf_key newpkeys[neighbors_cnt];
 
+	u8 keycpy[PRG_INPUT_LEN];
+	u8 tmp[2*PRG_INPUT_LEN];
+	u8 n;
+	bool set;
+
+	memcpy(keycpy, root->key, PRG_INPUT_LEN);
+	n = root->lbl.depth;
+	while (n < MAX_DEPTH) {
+		prg_from_aes_ctr(keycpy, tmp);
+		set = check_bit_is_set(lbl->bstr, n);
+		if (set) {
+			memcpy(keycpy, tmp, PRG_INPUT_LEN);
+			memcpy(newpkeys[n - root->lbl.depth].key, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
+		} else {
+			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
+			memcpy(newpkeys[n - root->lbl.depth].key, tmp, PRG_INPUT_LEN);
+		}
+		memcpy(&newpkeys[n - root->lbl.depth].lbl, lbl, sizeof(struct node_label));
+		set_bit_in_buf(newpkeys[n - root->lbl.depth].lbl.bstr, n, !set);
+		newpkeys[n - root->lbl.depth].lbl.depth = n+1;
+		// print_pkey(&newpkeys[n - root->lbl.depth]);
+		++n;
+	}
 	// 3. insert new keys
+	sort(newpkeys, neighbors_cnt, sizeof(struct pprf_key), &compare_pkeys_by_label, NULL);
+	memmove(master_key + i + neighbors_cnt, master_key + i+1, sizeof(struct pprf_key) * (master_key_count - i-1));
+	memcpy(master_key + i, newpkeys, sizeof(struct pprf_key) * neighbors_cnt);
+	master_key_count += neighbors_cnt - 1;
 }
 
 
@@ -243,7 +282,16 @@ void print_label(struct node_label *lbl) {
     printk(KERN_INFO "NODE LABEL: %s, depth: %d\n", node_label_str, lbl->depth);
 }
 
+void print_master_key(void) {
+	int i;
 
+	printk(KERN_INFO ": Master key dump START:\n");
+	for (i=0; i<master_key_count; ++i) 
+		print_pkey(&master_key[i]);
+
+	printk(KERN_INFO ": END Master key dump\n");
+
+}
 
 
 // tests
@@ -306,59 +354,50 @@ void test_sort_lexicographic(void) {
 
 void test_find_prefix(void) {
 	struct node_label nlbl;
-	init_pkey_from_bitstring(master_key+1, NULL, "0");
-	init_pkey_from_bitstring(master_key+2, NULL, "11");
-	master_key_count = 3;
+	init_pkey_from_bitstring(master_key, NULL, "0");
+	init_pkey_from_bitstring(master_key+1, NULL, "11");
+	master_key_count = 2;
 
 	init_node_label_from_bitstring(&nlbl, "01");
 
-	struct pprf_key *root = find_pkey_by_prefix(&nlbl);
+	int idx = find_pkey_index_by_prefix(&nlbl);
+	struct pprf_key *root = master_key+idx;
 	printk(KERN_INFO "ROOT: %p\n", root);
 	if (root)
 		print_pkey(root);
 }
 
-// remember to free the allocated memory
-// char** alloc_and_gen_bitstrings(u8 len) {
-// 	u8 d, i;
 
-// 	char** list = kmalloc_array((1<<len+1)- 1, sizeof(char*), GFP_KERNEL);
-// 	list[0] = kzalloc(1, GFP_KERNEL);
-// 	list[0][0] = '\0';
-// 	for (d=1; d<=len; ++d) {
-// 		for (i=(1<<d)-1; i<(1<<(d+1))-1; i+=2) {
-// 			list[i] = kzalloc(d+1, GFP_KERNEL);
-// 			list[i+1] = kzalloc(d+1, GFP_KERNEL);
-// 			strcpy(list[i], list[(i-1)/2]);
-// 			strcpy(list[i+1], list[(i-1)/2]);
-// 			list[i][d-1]='0';
-// 			list[i+1][d-1]='1';
-// 		}
-// 	}
+void test_puncture_0(void) {
+	struct node_label punct_node;
 
-// 	return list;
-// }
+	init_pkey_top_level(master_key);
+	master_key_count = 1;
+	print_master_key();
 
-// void test_alloc_and_gen_bitstrings(void) {
-// 	int i;
-// 	char** list;
-	
-// 	list = alloc_and_gen_bitstrings(2);
-// 	printk(KERN_INFO "length 2 strings:");
-// 	for (i=0; i<(1<<(2+1))-1; ++i)
-// 		printk(KERN_CONT " %s,", list[i]);
-// 		kfree(list[i]);
-// 	kfree(list);
+	printk(KERN_INFO "Puncturing 10...\n");
+	init_node_label_from_bitstring(&punct_node, "10");
+	puncture(&punct_node);
+	print_master_key();
 
-// 	list = alloc_and_gen_bitstrings(3);
-// 	printk(KERN_INFO "length 3 strings:");
-// 	for (i=0; i<(1<<(3+1))-1; ++i)
-// 		printk(KERN_CONT " %s,", list[i]);
-// 		kfree(list[i]);
-// 	kfree(list);
+	printk(" ... resetting...\n");
 
-// }
+	init_pkey_top_level(master_key);
+	master_key_count = 1;
+	print_master_key();
 
+	printk(KERN_INFO "Puncturing 01...\n");
+	init_node_label_from_bitstring(&punct_node, "01");
+	puncture(&punct_node);
+	print_master_key();
+
+	printk(KERN_INFO "Puncturing 10...\n");
+	init_node_label_from_bitstring(&punct_node, "10");
+	puncture(&punct_node);
+	print_master_key();
+
+
+}
 
 
 void run_tests(void) {
@@ -375,6 +414,8 @@ void run_tests(void) {
 	printk(KERN_INFO "\n running test_find_prefix\n");
 	test_find_prefix();
 	
+	printk(KERN_INFO "\n running test_puncture_0\n");
+	test_puncture_0();
 
 	printk(KERN_INFO "\n tests complete\n");
 
