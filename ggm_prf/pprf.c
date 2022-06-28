@@ -4,7 +4,9 @@
 #include <linux/scatterlist.h>
 #include <crypto/rng.h>
 #include <linux/sort.h>
-#include <linux/bsearch.h>
+#include <linux/vmalloc.h>
+
+#include <linux/timekeeping.h>
 
 #define PRG_INPUT_LEN 16
 
@@ -14,13 +16,12 @@ u8 aes_input[2*PRG_INPUT_LEN] = "\000\001\002\003\004\005\006\007"
 								"\030\031\032\033\034\035\036\037";
 
 u8 iv[PRG_INPUT_LEN];
-// u8 key[PRG_INPUT_LEN];
 struct scatterlist sg_in;
 struct crypto_blkcipher *tfm;
 
-// This is arbitrary. it can support 2^56 inodes
-#define MAX_DEPTH 56 
-#define NODE_LABEL_LEN 7
+// This is arbitrary. it can support 2^64 inodes. Currently supporting anything larger would involve some rewriting
+#define MAX_DEPTH 64 
+#define NODE_LABEL_LEN 8
 
 u8 pprf_depth = 16;
 
@@ -35,7 +36,16 @@ struct pprf_key {
 };
 
 struct pprf_key* master_key;
+unsigned long master_key_first_page;
 int master_key_count; // how many individual keys make up the master key
+int max_master_key_count;
+
+struct prefix_result {
+	bool exact;
+	int index;
+};
+
+struct prefix_result (*find_pkey_index_by_prefix) (struct node_label*);
 
 
 void print_pkey(struct pprf_key* pkey);
@@ -74,35 +84,28 @@ void set_bit_in_buf(u8* buf, u8 index, bool val) {
 		buf[index/8] &= ((u8)-1) - (1 << (index%8));
 }
 
-void ggm_prf(u8* in, u8* out, struct pprf_key* pkey) {
-	u8 keycpy[PRG_INPUT_LEN];
-	u8 tmp[2*PRG_INPUT_LEN];
-	u8 n;
 
-	memcpy(keycpy, pkey->key, PRG_INPUT_LEN);
-	n = 0;
-	while (n < pprf_depth - pkey->lbl.depth) {
-		prg_from_aes_ctr(keycpy, tmp);
-		if (check_bit_is_set(in, n)) {
-			memcpy(keycpy, tmp, PRG_INPUT_LEN);
-		} else {
-			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
-		}
-// #ifdef DEBUG
-		printk(KERN_INFO "At round %u/%u: tmp = %032ph,\n\t\t bit=%u, next key = %016ph", 
-                n, pkey->lbl.depth, tmp, check_bit_is_set(in,n), keycpy);
-// #endif
-		++n;
-	}
-	memcpy(out, keycpy, PRG_INPUT_LEN);
-}
-
-
+// some of these need error returns
 
 int alloc_master_key(void) {
     if (!master_key_count) {
-        master_key = kmalloc_array(2000, sizeof(struct pprf_key), GFP_KERNEL);
+		// 	max_master_key_count = ((4<<10) <<10) / sizeof(struct pprf_key);
+		// 	master_key = (void*)__get_free_pages(GFP_KERNEL, 10);
+		max_master_key_count = 16000;
+        master_key = vmalloc(sizeof(struct pprf_key)*max_master_key_count);
     }
+	return 0;
+}
+
+int expand_master_key(void) {
+	void* tmp = vmalloc(max_master_key_count*2*sizeof(struct pprf_key));
+	if (!tmp)
+		return -ENOMEM;
+	memcpy(tmp, master_key, sizeof(struct pprf_key) * max_master_key_count);
+	vfree(master_key);
+	max_master_key_count *= 2;
+	master_key = tmp;
+
 	return 0;
 }
 
@@ -179,45 +182,83 @@ int compare_pkeys_by_label(const void* pk1, const void* pk2) {
 	return compare_node_labels(&((struct pprf_key*) pk1)->lbl, &((struct pprf_key*) pk2)->lbl);
 }
 
+// returns -1 if the label should be before the pk, etc
 int compare_label_to_pkey(const void *l, const void *pk) {
 	return compare_node_labels(l, &((struct pprf_key*) pk)->lbl);
 }
 
-bool is_prefix(struct node_label *lbl, struct node_label *pre) {
+// Return 1 if strict prefix, 0 if equal, and -1 if not prefix
+int is_prefix(struct node_label *lbl, struct node_label *pre) {
 	int i;
 	bool b1, b2;
 
 	if (pre->depth > lbl->depth)
-		return false;
+		return -1;
 	for (i=0; i<pre->depth; ++i) {
 		b1 = check_bit_is_set(lbl->bstr, i);
 		b2 = check_bit_is_set(pre->bstr, i);
 		if (b1 != b2) 
-			return false;
+			return -1;
 	}
-	return true;
+	return pre->depth == lbl->depth ? 0 : 1;
 }
 
 
 
 // puncture operation
 
-int find_pkey_index_by_prefix(struct node_label *lbl) {
-	// return (struct pprf_key*) bsearch(lbl, master_key, master_key_count, sizeof(struct pprf_key), &compare_label_to_pkey);
-	int i;
+
+// This returns master_key_count if its not a prefix
+struct prefix_result find_pkey_index_by_prefix_linear(struct node_label *lbl) {
+	int i, r;
+	struct prefix_result ret;
 
 	for (i=0; i<master_key_count; ++i) {
-		if (is_prefix(lbl, &master_key[i].lbl))
-			return i;
+		r = is_prefix(lbl, &master_key[i].lbl);
+		if (r == 0) {
+			ret = (struct prefix_result) {true, i};
+			return ret;
+		}
+		if (r == 1) {
+			ret = (struct prefix_result) {false, i};
+			return ret;
+		}
 	}
-	return master_key_count;
+	ret = (struct prefix_result) {false,  master_key_count};
+	return ret;
 }
+
+struct prefix_result find_pkey_index_by_prefix_bsearch(struct node_label *lbl) {
+	int i, r, l, cmp, step;
+	struct prefix_result ret = {false, master_key_count};
+
+	i = -1;
+	for (step = master_key_count; step >= 1; step /= 2) {
+		while (i + step < master_key_count 
+			&& compare_label_to_pkey(lbl, &master_key[i+step]) >= 0) {
+			i += step;
+		}
+	} 
+	cmp = is_prefix(lbl, &master_key[i].lbl);
+	if (cmp == 0) {
+		ret = (struct prefix_result) {true, i};
+	} else if (cmp == 1) {
+		ret = (struct prefix_result) {false, i};
+	}
+	return ret;
+}
+
+
 
 
 void puncture(struct node_label *lbl) {
 	// 1. find root in master key
-	int i = find_pkey_index_by_prefix(lbl);
-	struct pprf_key *root = &master_key[i];
+	struct prefix_result r = find_pkey_index_by_prefix(lbl);
+	if (r.index == master_key_count || r.exact)
+		return;
+
+	int i = r.index;
+	struct pprf_key *root = &master_key[r.index];
 
 	// 2. find all neighbors in path
 	int neighbors_cnt = pprf_depth - root->lbl.depth; 
@@ -251,6 +292,10 @@ void puncture(struct node_label *lbl) {
 	memmove(master_key + i + neighbors_cnt, master_key + i+1, sizeof(struct pprf_key) * (master_key_count - i-1));
 	memcpy(master_key + i, newpkeys, sizeof(struct pprf_key) * neighbors_cnt);
 	master_key_count += neighbors_cnt - 1;
+
+	// 4. expand array if necessary (array version)
+	if (master_key_count > max_master_key_count - MAX_DEPTH) 
+		expand_master_key();
 }
 
 void puncture_at_tag(u64 tag) {
@@ -269,7 +314,7 @@ int evaluate_at_tag(u64 tag, u8* out) {
 	struct node_label lbl;
 	init_node_label_from_long(&lbl, tag, pprf_depth);
 
-	int keyidx = find_pkey_index_by_prefix(&lbl);
+	int keyidx = find_pkey_index_by_prefix(&lbl).index;
 	if (keyidx == master_key_count) 
 		return -1;
 
@@ -293,9 +338,6 @@ int evaluate_at_tag(u64 tag, u8* out) {
 	memcpy(out, keycpy, PRG_INPUT_LEN);
 	return 0;
 }
-
-
-// convenience functions
 
 
 
@@ -410,7 +452,7 @@ void test_find_prefix(void) {
 
 	init_node_label_from_bitstring(&nlbl, "01");
 
-	int idx = find_pkey_index_by_prefix(&nlbl);
+	int idx = find_pkey_index_by_prefix(&nlbl).index;
 	struct pprf_key *root = master_key+idx;
 	printk(KERN_INFO "ROOT: %p\n", root);
 	if (root)
@@ -446,6 +488,12 @@ void test_puncture_0(void) {
 	init_node_label_from_bitstring(&punct_node, "10");
 	puncture(&punct_node);
 	print_master_key();
+
+	printk(KERN_INFO "Puncturing 01 again...\n");
+	init_node_label_from_bitstring(&punct_node, "01");
+	puncture(&punct_node);
+	print_master_key();
+
 }
 
 void test_puncture_1(void) {
@@ -530,12 +578,85 @@ void run_tests(void) {
 }
 
 
+// Some preliminary benchmarking
+
+void evaluate_n_times(u64* tag_array, int count) {
+	int n;
+	u64 nsstart, nsend;
+
+	ggm_prf_get_random_bytes_kernel((u8*) tag_array, sizeof(u64)*count);
+	printk(KERN_INFO "Begin evaluation: keylength = %u\n", master_key_count);
+	nsstart = ktime_get_ns();
+	for(n=0; n<count; ++n) {
+		u8 out[PRG_INPUT_LEN];
+		evaluate_at_tag(tag_array[n], out);
+	}
+	nsend = ktime_get_ns();
+	printk(KERN_INFO "Time: %llu us\nTime per eval: %d us\n", (nsend-nsstart)/1000, (nsend-nsstart)/1000/count);
+}
+
+void puncture_n_times(u64* tag_array, int count) {
+	int n;
+	u64 nsstart, nsend;
+
+	ggm_prf_get_random_bytes_kernel((u8*) tag_array, count*sizeof(u64));
+	printk(KERN_INFO "Puncturing %u times:\n", count);
+	nsstart = ktime_get_ns();
+	for (n=0; n<count; ++n) {
+		puncture_at_tag(tag_array[n]);
+	}
+	nsend = ktime_get_ns();
+	printk(KERN_INFO "Time: %llu us\nTime per puncture: %d us\n", (nsend-nsstart)/1000, (nsend-nsstart)/1000/count);
+}
+
+void preliminary_benchmark_cycle(void) {
+	init_pkey_top_level(&master_key[0]);
+	master_key_count = 1;
+	pprf_depth = 64;
+
+	int maxcount = 10000;
+	int count;
+	
+	u64 *tag_array;
+	tag_array = kmalloc_array(maxcount, sizeof(long), GFP_KERNEL);
+
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 100);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 400);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 500);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 1000);
+	evaluate_n_times(tag_array, maxcount);
+	// Getting OOM
+	puncture_n_times(tag_array, 3000);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 5000);
+	evaluate_n_times(tag_array, maxcount);
+
+
+	kfree(tag_array);
+}
+
+void preliminary_benchmark(void) {	
+	find_pkey_index_by_prefix = find_pkey_index_by_prefix_linear;
+	printk(KERN_INFO "  Benchmark for linear search");
+	preliminary_benchmark_cycle();
+	
+	find_pkey_index_by_prefix = find_pkey_index_by_prefix_bsearch;
+	printk(KERN_INFO "  Benchmark for binary search");
+	preliminary_benchmark_cycle();
+}
+
 // kernel mod init/exit functions
 
 static int __init ggm_pprf_init(void) {
 	ggm_prf_get_random_bytes_kernel(iv, PRG_INPUT_LEN);
     (void) alloc_master_key();
     init_pkey_top_level(&master_key[0]);
+	find_pkey_index_by_prefix = find_pkey_index_by_prefix_bsearch;
+
 
 	tfm = crypto_alloc_blkcipher("ctr(aes)", 0, 0);
 	sg_init_one(&sg_in, aes_input, 2*PRG_INPUT_LEN);
@@ -547,12 +668,16 @@ static int __init ggm_pprf_init(void) {
 
 	run_tests();
 
+	printk(KERN_INFO "\n BENCHMARKS \n\n");
+
+	preliminary_benchmark();
+
 	return 0;
 }
 
 static void __exit ggm_pprf_exit(void) {
 	crypto_free_blkcipher(tfm);
-    kfree(master_key);
+    vfree(master_key);
 	printk(KERN_INFO "ggm pprf testing module unloaded\n");
 
 }
