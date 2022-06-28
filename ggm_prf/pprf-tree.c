@@ -127,13 +127,18 @@ int alloc_master_key(void) {
 	return 0;
 }
 
+#define EXPANSION_FACTOR 4
+
 int expand_master_key(void) {
-	void* tmp = vmalloc(max_master_key_count*2*sizeof(pprf_keynode));
+#ifdef DEBUG
+	printk("RESIZING: current size = %u\n", max_master_key_count);
+#endif	
+	void* tmp = vmalloc(max_master_key_count*EXPANSION_FACTOR*sizeof(pprf_keynode));
 	if (!tmp)
 		return -ENOMEM;
 	memcpy(tmp, master_key, sizeof(pprf_keynode) * max_master_key_count);
 	vfree(master_key);
-	max_master_key_count *= 2;
+	max_master_key_count *= EXPANSION_FACTOR;
 	master_key = tmp;
 
 	return 0;
@@ -155,6 +160,20 @@ void init_node_label_from_bitstring(node_label *lbl, const char* bitstring) {
 	}
 }
 
+void init_node_label_from_long(struct node_label *lbl, u64 val) {
+	u8 idx;
+
+	lbl->depth = pprf_depth;
+	for (idx=0; idx<pprf_depth; ++idx) {
+		set_bit_in_buf(lbl->bstr, pprf_depth-1-idx, (1<<idx) & val);
+	}
+}
+
+// void init_node_label_from_long(node_label *lbl, u64 u) {
+// 	__be64 bigendian = cpu_to_be64(u);
+// 	memcpy(lbl->bstr, (u8*) &bigendian, NODE_LABEL_LEN);
+// 	lbl->depth = pprf_depth;
+// }
 
 
 /* tree traversal
@@ -174,11 +193,11 @@ pprf_keynode *find_key(node_label *lbl, u32 *depth) {
 		else
 			i = cur->il;
 	// if equals 0, leaf
-	// if equals -1, punctured
+	// if equals -1, punctured (currently does not occur before pprf_depth)
 		if (i == 0) 
 			return cur;
-		else if (i == (u32)-1)
-			return NULL;
+		// else if (i == (u32)-1)
+		// 	return NULL;
 		++*depth;
 	} while (*depth < pprf_depth);
 
@@ -194,11 +213,11 @@ pprf_keynode *find_key(node_label *lbl, u32 *depth) {
  * at that tag had already been executed)
  */
 int puncture(node_label *lbl) {
-	int depth;
+	u32 depth;
 
 	pprf_keynode *root = find_key(lbl, &depth);
 	
-	// so it will be NULL if its already been punctured, in which case we just return
+	// it will be NULL if its already been punctured, in which case we just return
 	if (!root)
 		return -1;
 
@@ -210,7 +229,6 @@ int puncture(node_label *lbl) {
 
 	memcpy(keycpy, root->key, PRG_INPUT_LEN);
 	memset(root->key, 0xcc, PRG_INPUT_LEN);
-	// reset_pprf_keynode(root);
 	while (depth < pprf_depth) {
 		prg_from_aes_ctr(keycpy, tmp);
 		set = check_bit_is_set(lbl->bstr, depth);
@@ -240,43 +258,22 @@ int puncture(node_label *lbl) {
 		++depth;
 		root = master_key + master_key_count-1;
 	}
-
-	// special handling at the bottom depth
-// 	prg_from_aes_ctr(keycpy, tmp);
-// 	set = check_bit_is_set(lbl->bstr, depth);
-// 	if (set) {
-// 		memcpy((&master_key[master_key_count])->key, tmp, PRG_INPUT_LEN);
-// 		root->il = master_key_count;
-// 		root->ir = master_key_count+1;
-// 	} else {
-// 		memcpy((&master_key[master_key_count])->key, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
-// 		root->ir = master_key_count;
-// 		root->il = master_key_count+1;
-// 	}
-// #ifdef DEBUG
-// 	memcpy(&master_key[master_key_count].lbl, lbl, sizeof(node_label));
-// 	set_bit_in_buf(master_key[master_key_count].lbl.bstr, depth, !set);
-// 	master_key[master_key_count].lbl.depth = depth+1;
-
-// 	memcpy(&master_key[master_key_count+1].lbl, lbl, sizeof(node_label));
-// 	set_bit_in_buf(master_key[master_key_count+1].lbl.bstr, depth, set);
-// 	master_key[master_key_count+1].lbl.depth = depth+1;
-// #endif
-// 	master_key[master_key_count].il = 0;
-// 	master_key[master_key_count].ir = 0;
-// 	master_key[master_key_count+1].il = -1;
-// 	master_key[master_key_count+1].ir = -1;
-// 	master_key_count += 2;		
-
+	// At the end of the loop, the root node is always a punctured node. So set links accordingly
 	root->il = -1;
 	root->ir = -1;
 
-
-	// // 4. expand array if necessary (array version)
-	if (master_key_count > max_master_key_count - MAX_DEPTH) 
+	// // 4. expand array if necessary
+	if (master_key_count > max_master_key_count - MAX_DEPTH*2) 
 		expand_master_key();
 	
 	return 0;
+}
+
+int puncture_at_tag(u64 tag) {
+	node_label lbl;
+	init_node_label_from_long(&lbl, tag);
+
+	return puncture(&lbl);
 }
 
 
@@ -285,39 +282,45 @@ int puncture(node_label *lbl) {
  * 	Otherwise returns 0 and out should be filled with the 
  * 	evaluation of PPRF(tag)
  */
-// int evaluate_at_tag(u64 tag, u8* out) {
-// 	struct node_label lbl;
-// 	init_node_label_from_long(&lbl, tag, pprf_depth);
+int evaluate(node_label *lbl, u8 *out) {
+#ifdef DEBUG
+	memset(out, 0xcc, PRG_INPUT_LEN);
+#endif
+	u32 depth;
+	pprf_keynode *root = find_key(lbl, &depth);
+	if (!root) 
+		return -1;
 
-// 	int keyidx = find_pkey_index_by_prefix(&lbl).index;
-// 	if (keyidx == master_key_count) 
-// 		return -1;
+	u8 keycpy[PRG_INPUT_LEN];
+	u8 tmp[2*PRG_INPUT_LEN];
+	bool set;
+	memcpy(keycpy, root->key, PRG_INPUT_LEN);
 
-// 	u8 keycpy[PRG_INPUT_LEN];
-// 	u8 tmp[2*PRG_INPUT_LEN];
-// 	bool set;
-// 	memcpy(keycpy, master_key[keyidx].key, PRG_INPUT_LEN);
-
-// 	int n = master_key[keyidx].lbl.depth;
-// 	// printk(KERN_INFO "Begin eval: \n");
-// 	for (; n<pprf_depth; ++n) {
-// 		// printk(KERN_CONT " %u\n", n);
-// 		prg_from_aes_ctr(keycpy, tmp);
-// 		set = check_bit_is_set(lbl.bstr, n);
-// 		if (set) {
-// 			memcpy(keycpy, tmp, PRG_INPUT_LEN);
-// 		} else {
-// 			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
-// 		}
-// 	}
-// 	memcpy(out, keycpy, PRG_INPUT_LEN);
-// 	return 0;
-// }
+	for (; depth<pprf_depth; ++depth) {
+		prg_from_aes_ctr(keycpy, tmp);
+		set = check_bit_is_set(lbl->bstr, depth);
+		if (set) {
+			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
+		} else {
+			memcpy(keycpy, tmp, PRG_INPUT_LEN);
+		}
+	}
+	memcpy(out, keycpy, PRG_INPUT_LEN);
+	return 0;
+}
 
 
+int evaluate_at_tag(u64 tag, u8* out) {
+	node_label lbl;
+	init_node_label_from_long(&lbl, tag);
 
+	return evaluate(&lbl, out);
+}
+
+
+
+#ifdef DEBUG
 // printing functions
-
 void label_to_string(struct node_label *lbl, char* node_label_str) {
     int i;
 	
@@ -333,7 +336,6 @@ void label_to_string(struct node_label *lbl, char* node_label_str) {
 	}
 }
 
-#ifdef DEBUG
 // prints the key that evaluates this label (or none if punctured)
 void print_pkeynode_debug(node_label *lbl) {
     // terrible terrible stringy stuff
@@ -381,7 +383,15 @@ void test_print_pkey(void) {
 	print_pkeynode_debug(&lbl);
 }
 
+void test_cpu_to_be64(void) {
+	node_label lbl;
+	char node_label_str[8*NODE_LABEL_LEN+1];
+	pprf_depth = 16;
 
+	init_node_label_from_long(&lbl, 1);
+	label_to_string(&lbl, node_label_str);
+	printk(KERN_INFO "label is %s", node_label_str);
+}
 
 void test_puncture_0(void) {
 	node_label punct_node;
@@ -429,63 +439,100 @@ void test_puncture_0(void) {
 
 }
 
-// void test_puncture_1(void) {
-// 	struct node_label punct_node;
+void test_puncture_1(void) {
+	node_label punct_node;
+	int r;
 
-// 	init_pkey_top_level(&master_key[0]);
-// 	master_key_count = 1;
-// 	print_master_key();
-// 	printk(KERN_INFO "Setting pprf depth = 16\n");
-// 	pprf_depth = 16;
+	init_master_key();
+	print_master_key();
+	printk(KERN_INFO "Setting pprf depth = 16\n");
+	pprf_depth = 16;
 
-// 	printk(KERN_INFO "Puncturing tag=0...\n");
-// 	init_node_label_from_long(&punct_node, 0, pprf_depth);
-// 	puncture(&punct_node);
-// 	print_master_key();
+	printk(KERN_INFO "Puncturing tag=0...\n");
+	init_node_label_from_long(&punct_node, 0);
+	r = puncture(&punct_node);
+	BUG_ON(unlikely(r));
+	print_master_key();
 
-// 	printk(KERN_INFO "Puncturing tag=1...\n");
-// 	init_node_label_from_long(&punct_node, 1, pprf_depth);
-// 	puncture(&punct_node);
-// 	print_master_key();
+	printk(KERN_INFO "Puncturing tag=1...\n");
+	init_node_label_from_long(&punct_node, 1);
+	r = puncture(&punct_node);
+	BUG_ON(unlikely(r));
+	print_master_key();
 
-// 	printk(KERN_INFO "Puncturing tag=2...\n");
-// 	init_node_label_from_long(&punct_node, 2, pprf_depth);
-// 	puncture(&punct_node);
-// 	print_master_key();
+	printk(KERN_INFO "Puncturing tag=2...\n");
+	init_node_label_from_long(&punct_node, 2);
+	r = puncture(&punct_node);
+	BUG_ON(unlikely(r));
+	print_master_key();
 
-// 	printk(KERN_INFO "Puncturing tag=65535...\n");
-// 	init_node_label_from_long(&punct_node, (1<<16)-1, pprf_depth);
-// 	puncture(&punct_node);
-// 	print_master_key();
-// }
+	printk(KERN_INFO "Puncturing tag=65535...\n");
+	init_node_label_from_long(&punct_node, (1<<16)-1);
+	r = puncture(&punct_node);
+	BUG_ON(unlikely(r));
+	print_master_key();
+}
 
+void test_evaluate_0(void) {
+	init_master_key();
+	print_master_key();
+	printk(KERN_INFO "Setting pprf depth = 16\n");
+	pprf_depth = 16;
 
-// void test_evaluate_0(void) {
-// 	init_pkey_top_level(&master_key[0]);
-// 	master_key_count = 1;
-// 	print_master_key();
-// 	printk(KERN_INFO "Setting pprf depth = 16\n");
-// 	pprf_depth = 16;
+	int r;
+	u8 out[PRG_INPUT_LEN];
 
-// 	int r;
+	r = evaluate_at_tag(0, out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(1, out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(255, out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 
-// 	u8 out[PRG_INPUT_LEN];
-// 	r = evaluate_at_tag(0, out);
-// 	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
-// 	r = evaluate_at_tag(255, out);
-// 	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Puncturing tag=1...\n");
+	r = puncture_at_tag(1);
+	BUG_ON(unlikely(r));
+	print_master_key();
 
-// 	printk(KERN_INFO "Puncturing tag=1...\n");
-// 	puncture_at_tag(1);
-// 	print_master_key();
+	r = evaluate_at_tag(0, out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(1, out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(255, out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 
-// 	r = evaluate_at_tag(0, out);
-// 	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
-// 	r = evaluate_at_tag(1, out);
-// 	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
-// 	r = evaluate_at_tag(255, out);
-// 	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
-// }master_key[i]
+	printk(KERN_INFO "Puncturing tag=0...\n");
+	r = puncture_at_tag(0);
+	BUG_ON(unlikely(r));
+	print_master_key();
+
+	r = evaluate_at_tag(0, out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(1, out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	r = evaluate_at_tag(255, out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+}
+
+void test_evaluate_1(void) {
+	init_master_key();
+	printk(KERN_INFO "Setting pprf depth = 64\n");
+	pprf_depth = 64;
+
+	int r,i,rd;
+	u8 out[PRG_INPUT_LEN];
+	for (rd=0; rd<16; ++rd) {
+		printk(KERN_INFO "\n  puncture at tag=%u\n", rd);
+		r = puncture_at_tag(rd);
+		BUG_ON(unlikely(r));
+		for (i=0; i<16; ++i) {
+			r = evaluate_at_tag(i, out);
+			BUG_ON(unlikely(r && i>rd));
+			printk(KERN_INFO "Evaluation at tag %u: %s (%016ph)\n", i, r == 0?"SUCCESS" :"PUNCTURED", out);
+		}
+	}
+
+}
 
 
 void run_tests(void) {
@@ -493,86 +540,88 @@ void run_tests(void) {
 	printk(KERN_INFO "\n running test_print_pkey\n");
 	test_print_pkey();
 
+	printk(KERN_INFO "\n running test_cpu_to_be64\n");
+	test_cpu_to_be64();
+
 	printk(KERN_INFO "\n running test_puncture_0\n");
 	test_puncture_0();	
-	// printk(KERN_INFO "\n running test_puncture_1\n");
-	// test_puncture_1();
+	printk(KERN_INFO "\n running test_puncture_1\n");
+	test_puncture_1();
 
-	// printk(KERN_INFO "\n running test_evaluate_0\n");
-	// test_evaluate_0();
+	printk(KERN_INFO "\n running test_evaluate_0\n");
+	test_evaluate_0();
+	printk(KERN_INFO "\n running test_evaluate_1\n");
+	test_evaluate_1();
 
 	printk(KERN_INFO "\n tests complete\n");
 
 }
+#endif
 
 
 // Some preliminary benchmarking
+#ifdef TIME
+void evaluate_n_times(u64* tag_array, int count) {
+	int n;
+	u64 nsstart, nsend;
 
-// void evaluate_n_times(u64* tag_array, int count) {
-// 	int n;
-// 	u64 nsstart, nsend;
+	ggm_prf_get_random_bytes_kernel((u8*) tag_array, sizeof(u64)*count);
+	printk(KERN_INFO "Begin evaluation: keylength = %u\n", master_key_count);
+	nsstart = ktime_get_ns();
+	for(n=0; n<count; ++n) {
+		u8 out[PRG_INPUT_LEN];
+		evaluate_at_tag(tag_array[n], out);
+	}
+	nsend = ktime_get_ns();
+	printk(KERN_INFO /*"Time: %llu us\n"*/"Time per eval: %d us\n", /*(nsend-nsstart)/1000, */(nsend-nsstart)/1000/count);
+}
 
-// 	ggm_prf_get_random_bytes_kernel((u8*) tag_array, sizeof(u64)*count);
-// 	printk(KERN_INFO "Begin evaluation: keylength = %u\n", master_key_count);
-// 	nsstart = ktime_get_ns();
-// 	for(n=0; n<count; ++n) {
-// 		u8 out[PRG_INPUT_LEN];
-// 		evaluate_at_tag(tag_array[n], out);
-// 	}
-// 	nsend = ktime_get_ns();
-// 	printk(KERN_INFO "Time: %llu us\nTime per eval: %d us\n", (nsend-nsstart)/1000, (nsend-nsstart)/1000/count);
-// }
+void puncture_n_times(u64* tag_array, int count) {
+	int n;
+	u64 nsstart, nsend;
 
-// void puncture_n_times(u64* tag_array, int count) {
-// 	int n;
-// 	u64 nsstart, nsend;
+	ggm_prf_get_random_bytes_kernel((u8*) tag_array, count*sizeof(u64));
+	printk(KERN_INFO "Puncturing %u times:\n", count);
+	nsstart = ktime_get_ns();
+	for (n=0; n<count; ++n) {
+		puncture_at_tag(tag_array[n]);
+	}
+	nsend = ktime_get_ns();
+	printk(KERN_INFO /*"Time: %llu us\n"*/"Time per puncture: %d us\n", /*(nsend-nsstart)/1000, */(nsend-nsstart)/1000/count);
+}
 
-// 	ggm_prf_get_random_bytes_kernel((u8*) tag_array, count*sizeof(u64));
-// 	printk(KERN_INFO "Puncturing %u times:\n", count);
-// 	nsstart = ktime_get_ns();
-// 	for (n=0; n<count; ++n) {
-// 		puncture_at_tag(tag_array[n]);
-// 	}
-// 	nsend = ktime_get_ns();
-// 	printk(KERN_INFO "Time: %llu us\nTime per puncture: %d us\n", (nsend-nsstart)/1000, (nsend-nsstart)/1000/count);
-// }
+void preliminary_benchmark_cycle(void) {
+	init_master_key();
+	pprf_depth = 64;
 
-// void preliminary_benchmark_cycle(void) {
-// 	init_pkey_top_level(&master_key[0]);
-// 	master_key_count = 1;
-// 	pprf_depth = 64;
-
-// 	int maxcount = 10000;
-// 	int count;
+	int maxcount = 100000;
+	int count;
 	
-// 	u64 *tag_array;
-// 	tag_array = kmalloc_array(maxcount, sizeof(long), GFP_KERNEL);
+	u64 *tag_array;
+	tag_array = kmalloc_array(maxcount, sizeof(long), GFP_KERNEL);
 
-// 	evaluate_n_times(tag_array, maxcount);
-// 	puncture_n_times(tag_array, 100);
-// 	evaluate_n_times(tag_array, maxcount);
-// 	puncture_n_times(tag_array, 400);
-// 	evaluate_n_times(tag_array, maxcount);
-// 	puncture_n_times(tag_array, 500);
-// 	evaluate_n_times(tag_array, maxcount);
-// 	puncture_n_times(tag_array, 1000);
-// 	evaluate_n_times(tag_array, maxcount);
-// 	// Getting OOM
-// 	puncture_n_times(tag_array, 3000);
-// 	evaluate_n_times(tag_array, maxcount);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 100);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 400);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 500);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 1000);
+	evaluate_n_times(tag_array, maxcount);
+	// Getting OOM
+	puncture_n_times(tag_array, 3000);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 5000);
+	evaluate_n_times(tag_array, maxcount);
+	puncture_n_times(tag_array, 15000);
+	evaluate_n_times(tag_array, maxcount);
 
-
-// 	kfree(tag_array);
-// }
+	kfree(tag_array);
+}
 
 void preliminary_benchmark(void) {	
-	// find_pkey_index_by_prefix = find_pkey_index_by_prefix_linear;
-	// printk(KERN_INFO "  Benchmark for linear search");
-	// preliminary_benchmark_cycle();
-	
-	// find_pkey_index_by_prefix = find_pkey_index_by_prefix_bsearch;
-	// printk(KERN_INFO "  Benchmark for binary search");
-	// preliminary_benchmark_cycle();
+	preliminary_benchmark_cycle();
 }
 
 #endif
@@ -594,10 +643,12 @@ static int __init ggm_pprf_init(void) {
 
 
 #ifdef DEBUG
+	printk("\n === RUNNING TESTS ===\n\n");
 	run_tests();
+#endif
 
-	printk(KERN_INFO "\n BENCHMARKS \n\n");
-
+#ifdef TIME
+	printk(KERN_INFO "\n === RUNNING BENCHMARKS ===\n\n");
 	preliminary_benchmark();
 #endif
 

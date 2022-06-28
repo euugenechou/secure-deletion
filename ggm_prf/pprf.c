@@ -592,7 +592,7 @@ void evaluate_n_times(u64* tag_array, int count) {
 		evaluate_at_tag(tag_array[n], out);
 	}
 	nsend = ktime_get_ns();
-	printk(KERN_INFO "Time: %llu us\nTime per eval: %d us\n", (nsend-nsstart)/1000, (nsend-nsstart)/1000/count);
+	printk(KERN_INFO /*"Time: %llu us\n"*/"Time per eval: %d us\n", /*(nsend-nsstart)/1000, */(nsend-nsstart)/1000/count);
 }
 
 void puncture_n_times(u64* tag_array, int count) {
@@ -606,7 +606,7 @@ void puncture_n_times(u64* tag_array, int count) {
 		puncture_at_tag(tag_array[n]);
 	}
 	nsend = ktime_get_ns();
-	printk(KERN_INFO "Time: %llu us\nTime per puncture: %d us\n", (nsend-nsstart)/1000, (nsend-nsstart)/1000/count);
+	printk(KERN_INFO /*"Time: %llu us\n"*/"Time per puncture: %d us\n", /*(nsend-nsstart)/1000, */(nsend-nsstart)/1000/count);
 }
 
 void preliminary_benchmark_cycle(void) {
@@ -666,7 +666,7 @@ static int __init ggm_pprf_init(void) {
 
 
 
-	run_tests();
+	// run_tests();
 
 	printk(KERN_INFO "\n BENCHMARKS \n\n");
 
