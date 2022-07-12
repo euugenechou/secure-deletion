@@ -24,7 +24,7 @@
 #include "utils.h"
 #include "crypto.h"
 #include "netlink.h"
-#include "eraser.h"
+#include "holepunch.h"
 #include "tpm.h"
 
 void handle_signal(int sig) {
@@ -136,6 +136,16 @@ int verify_key(struct eraser_header *h) {
     }
 
     return 1;
+}
+
+
+/* THIS ONLY WORKS IF WE KEEP THE FIRST 5 ENTRIES IDENTICAL TO ERASER */
+void hp_get_keys(int op, holepunch_header *h) {
+    get_keys(op, (struct eraser_header*) h);
+}
+
+int hp_verify_key(holepunch_header *h) {
+    return verify_key((struct eraser_header*)h);
 }
 
 /* Clean the key memory. */
@@ -250,7 +260,7 @@ void do_close(char *eraser_name) {
 
 /* Device mapper open. */
 int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, char *mapped_dev_path, int netlink_pid) {
-
+    
     struct dm_task *dmt;
     u32 cookie = 0;
     u16 udev_flags = 0;
@@ -319,8 +329,10 @@ out:
 
 /* Open a ERASER instance. */
 void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
+    // print_red("NOT IMPLEMENTED\n");
+    // return;
 
-    struct eraser_header *h;
+    struct holepunch_header *hp_h;
     char *mapped_dev_path;
     int fd;
     char *buf;
@@ -334,18 +346,18 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     /* Read header. */
     buf = malloc(ERASER_HEADER_LEN * ERASER_SECTOR_LEN);
     read_sectors(fd, buf, ERASER_HEADER_LEN);
-    h = (struct eraser_header *) buf;
+    hp_h = (struct holepunch_header *) buf;
 
     /* Get password from user and check if correct. */
-    get_keys(ERASER_OPEN, h);
-    if(!verify_key(h)) {
+    hp_get_keys(ERASER_OPEN, hp_h);
+    if(!hp_verify_key(hp_h)) {
         print_red("Incorrect password!\n");
         goto free_headers;
     }
 
     /* Define the NVRAM region on TPM. */
     tpm = setup_tpm(tpm_owner_pass);
-    nvram = setup_nvram(h->nv_index, ERASER_KEY_LEN, tpm_owner_pass, tpm);
+    nvram = setup_nvram(hp_h->nv_index, ERASER_KEY_LEN, tpm_owner_pass, tpm);
 
     /* Construct mapped device path. */
     mapped_dev_path = malloc(strlen(ERASER_DEV_PATH) + strlen(mapped_dev) + 1);
@@ -356,7 +368,7 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     netlink_pid = start_netlink_client(eraser_name);
     if (netlink_pid != 0) {
         /* Device-mapper open. */
-        if (!open_eraser(dev_path, mapped_dev, h->data_len, eraser_name, mapped_dev_path, netlink_pid)) {
+        if (!open_eraser(dev_path, mapped_dev, hp_h->data_len, eraser_name, mapped_dev_path, netlink_pid)) {
             print_red("Cannot open ERASER device!\n");
             kill(netlink_pid, SIGTERM);
             goto free_name;
@@ -365,16 +377,17 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
         print_green("Success!\n");
     }
 
-#ifdef ERASER_DEBUG
-    print_green("Slot map start: %llu\n", h->slot_map_start);
-    print_green("Slot map sectors: %llu\n", h->slot_map_len);
+    #ifdef ERASER_DEBUG
+        print_green("Key table start: %llu\n", hp_h->key_table_start);
+        print_green("Key table sectors: %llu\n", hp_h->key_table_len);
 
-    print_green("inode map start: %llu\n", h->inode_map_start);
-    print_green("inode map sectors: %llu\n", h->inode_map_len);
+        print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
+        print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
 
-    print_green("Data start: %llu\n", h->data_start);
-    print_green("Data sectors: %llu\n", h->data_len);
-#endif
+        print_green("Data start: %llu\n", hp_h->data_start);
+        print_green("Data sectors: %llu\n", hp_h->data_len);
+    #endif
+
 
 
 free_name:
@@ -403,7 +416,7 @@ int start_netlink_client(char *eraser_name) {
 /* Create a ERASER instance. */
 void do_create(char *dev_path, int nv_index) {
 
-    struct eraser_header *h;
+    // struct eraser_header *h;
     unsigned char master_key[ERASER_KEY_LEN];
     u64 dev_size;
     u64 inode_count;
@@ -432,42 +445,54 @@ void do_create(char *dev_path, int nv_index) {
     print_green("-> ERASER sectors: %llu\n", dev_size / ERASER_SECTOR_LEN);
     print_green("-> Expecting %llu inodes for an ext4 partition\n\n", inode_count);
 #endif
+    /* Compute sizes for holepunch metadata */
 
-    /* Create header. */
-    buf = malloc(ERASER_HEADER_LEN * ERASER_SECTOR_LEN);
-    memset(buf, 0, ERASER_HEADER_LEN * ERASER_SECTOR_LEN);
-    h = (struct eraser_header *) buf;
+    /* The key table should have inode_num number of entries */
+    char *hp_buf;
+    holepunch_header *hp_h;
 
-    /* Compute sizes for ERASER device sections. */
-    h->inode_map_len = div_ceil(inode_count * sizeof(struct eraser_map_entry), ERASER_SECTOR_LEN);
-    h->slot_map_len = div_ceil(h->inode_map_len * sizeof(struct eraser_map_entry), ERASER_SECTOR_LEN);
-    h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN - h->slot_map_len - h->inode_map_len;
-    h->len = ERASER_HEADER_LEN + h->slot_map_len + h->inode_map_len + h->data_len;
+    // hp_buf = malloc(ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
+    // memset(hp_buf, 0, ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
+    hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
 
-    h->slot_map_start = ERASER_HEADER_LEN;
-    h->inode_map_start = h->slot_map_start + h->slot_map_len;
-    h->data_start = h->inode_map_start + h->inode_map_len;
+    hp_h->master_key_count = 1;
+    hp_h->max_master_key_count = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
+    hp_h->tag = inode_count+1;
+    hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
 
+    hp_h->key_table_len = div_ceil(inode_count * sizeof(holepunch_filekey_entry), ERASER_SECTOR_LEN);
+    hp_h->pprf_key_len = div_ceil(hp_h->max_master_key_count * sizeof(pprf_keynode), ERASER_SECTOR_LEN);
+    hp_h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN - hp_h->key_table_len - hp_h->pprf_key_len;
+    hp_h->len = hp_h->data_len + hp_h->pprf_key_len + hp_h->key_table_len;
+
+    hp_h->key_table_start = ERASER_HEADER_LEN;
+    hp_h->pprf_key_start = hp_h->key_table_start + hp_h->key_table_len;
+    hp_h->data_start = hp_h->pprf_key_start + hp_h->pprf_key_len;
 #ifdef ERASER_DEBUG
-    print_green("Slot map start: %llu\n", h->slot_map_start);
-    print_green("Slot map sectors: %llu\n", h->slot_map_len);
-
-    print_green("inode map start: %llu\n", h->inode_map_start);
-    print_green("inode map sectors: %llu\n", h->inode_map_len);
-
-    print_green("Data start: %llu\n", h->data_start);
-    print_green("Data sectors: %llu\n", h->data_len);
+    memset(hp_h->prg_iv, 0x88, PRG_INPUT_LEN);
+#else
+    get_random_bytes(hp_h->prg_iv, PRG_INPUT_LEN);
 #endif
 
-    get_random_data(h->slot_map_iv, ERASER_IV_LEN);
+#ifdef ERASER_DEBUG
+    print_green("Key table start: %llu\n", hp_h->key_table_start);
+    print_green("Key table sectors: %llu\n", hp_h->key_table_len);
+
+    print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
+    print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
+    print_green("PPRF key max elts: %llu\n", hp_h->max_master_key_count);
+
+    print_green("Data start: %llu\n", hp_h->data_start);
+    print_green("Data sectors: %llu\n", hp_h->data_len);
+#endif
 
     /* Prompt user for password. */
-    get_keys(ERASER_CREATE, h);
+    hp_get_keys(ERASER_CREATE, hp_h);
 
     /* Define the NVRAM region on TPM. */
     tpm = setup_tpm(tpm_owner_pass);
     nvram = setup_nvram(nv_index, ERASER_KEY_LEN, tpm_owner_pass, tpm);
-    h->nv_index = nv_index;
+    hp_h->nv_index = nv_index;
 
     get_random_data(master_key, ERASER_KEY_LEN);
     if (write_nvram(nvram, master_key) != TSS_SUCCESS) {
@@ -477,26 +502,75 @@ void do_create(char *dev_path, int nv_index) {
     memset(master_key, 0, ERASER_KEY_LEN);
 
     /* Write the header. */
-    write_sectors(fd, buf, ERASER_HEADER_LEN);
-
-#define RANDOM_FILL_SECTORS 1000
-    /* Write random map entries. */
-    buf = realloc(buf, RANDOM_FILL_SECTORS * ERASER_SECTOR_LEN);
-    max = h->slot_map_len + h->inode_map_len;
-    cur = 0;
-
-    while(cur < max) {
-        count = ((max - cur) > RANDOM_FILL_SECTORS) ? RANDOM_FILL_SECTORS : (max - cur);
-        get_random_data(buf, count * ERASER_SECTOR_LEN);
-        write_sectors(fd, buf, count);
-        cur += count;
+    write_sectors(fd, hp_h, ERASER_HEADER_LEN);
+    
+    hp_buf = malloc(sizeof(holepunch_filekey_entry) * inode_count);
+    
+    u32 ino_num;
+    holepunch_filekey_entry *filekey_table;
+    
+    filekey_table = (holepunch_filekey_entry *) hp_buf;
+    for (ino_num = 0; ino_num < inode_count; ++ino_num) {
+        filekey_table[ino_num].tag = ino_num;
+#ifdef ERASER_DEBUG
+        memset(filekey_table[ino_num].key, 0xbc, ERASER_KEY_LEN);
+        memset(filekey_table[ino_num].iv, 0xde, ERASER_IV_LEN);
+#else
+        get_random_data(filekey_table[ino_num].key, ERASER_KEY_LEN);
+        get_random_data(filekey_table[ino_num].iv, ERASER_IV_LEN);
+#endif
     }
+    
+#ifdef ERASER_DEBUG
+    print_green("fd at sector %u pos %u keytablelen=%u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, 
+                lseek(fd, 0, SEEK_CUR), hp_h->key_table_len);
+#endif
+    write_sectors(fd, hp_buf, hp_h->key_table_len);
+
+#ifdef ERASER_DEBUG
+    print_green("%u inodes initialized\n", ino_num);
+#endif
+
+    memset (hp_buf, 0, ERASER_SECTOR_LEN);
+    pprf_keynode *pprf_root = (pprf_keynode *) hp_buf;
+    pprf_root->il = 0;
+    pprf_root->ir = 0;
+    // get_random_data(pprf_root->key, PRG_INPUT_LEN);
+#ifdef ERASER_DEBUG
+	memset(pprf_root->lbl.bstr, 0xcc, NODE_LABEL_LEN);
+	pprf_root->lbl.depth = 0;
+    int i;
+    print_green("PPRF key: ");
+    for (i=0; i< PRG_INPUT_LEN; ++i) {
+        print_green(" %02x", pprf_root->key[i]);
+    }
+    // print_green("fd at sector %u pos %u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, lseek(fd, 0, SEEK_CUR));
+#endif
+    write_sectors(fd, hp_buf, 1);
+
+
+    // print_red("NOT IMPLEMENTED\n");
+    // return;
+
+// #define RANDOM_FILL_SECTORS 1000
+//     /* Write random map entries. */
+//     buf = realloc(buf, RANDOM_FILL_SECTORS * ERASER_SECTOR_LEN);
+//     max = h->slot_map_len + h->inode_map_len;
+//     cur = 0;
+
+//     while(cur < max) {
+//         count = ((max - cur) > RANDOM_FILL_SECTORS) ? RANDOM_FILL_SECTORS : (max - cur);
+//         get_random_data(buf, count * ERASER_SECTOR_LEN);
+//         write_sectors(fd, buf, count);
+//         cur += count;
+//     }
 
     /* All done. */
     sync();
-    print_green("Done!\n\n");
+    print_green("\nDone!\n\n");
 
-    free(buf);
+    free(hp_buf);
+    free(hp_h);
 tpm_error:
     cleanup_nvram(nvram);
     cleanup_tpm(tpm);

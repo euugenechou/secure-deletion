@@ -12,3 +12,5 @@
 **/*.dwo
 **/Module.symvers
 **/modules.order
+
+*.sh

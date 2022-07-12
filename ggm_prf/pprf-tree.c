@@ -3,68 +3,14 @@
 #include <crypto/hash.h>
 #include <linux/scatterlist.h>
 #include <crypto/rng.h>
-#include <linux/sort.h>
 #include <linux/vmalloc.h>
 #include <linux/bug.h>
+#include <linux/fs.h>
+#include "pprf-tree.h"
 
-#ifdef DEBUG
+#ifdef TIME
 #include <linux/timekeeping.h>
 #endif
-
-#define PRG_INPUT_LEN 16
-
-u8 aes_input[2*PRG_INPUT_LEN] = "\000\001\002\003\004\005\006\007"
-								"\010\011\012\013\014\015\016\017"
-								"\020\021\022\023\024\025\026\027"
-								"\030\031\032\033\034\035\036\037";
-
-u8 iv[PRG_INPUT_LEN];
-struct scatterlist sg_in;
-struct crypto_blkcipher *tfm;
-
-// This is arbitrary. it can support 2^64 inodes. Currently supporting anything larger would involve some rewriting
-#define MAX_DEPTH 64 
-#define NODE_LABEL_LEN (MAX_DEPTH+7)/8
-
-u8 pprf_depth = MAX_DEPTH;
-
-typedef struct node_label {
-	u8 bstr[NODE_LABEL_LEN];
-	u8 depth;
-} node_label;
-
-/* Binary-tree based organization of the PPRF keys
- * 	
- * We lay out the tree in an array consisting of
- * 	{il, ir, key[len]} triples
- * il: index where the left child is stored
- * ir: index where the right child is stored
- * key: value of the PPRF key (only meaningful for leaf nodes)
- * 
- * two sentinel indices
- * 0: this is a leaf node
- * -1: the subtree has been punctured
- * 
- * root node is placed at index 0
- * 
- * In particular I /don't/ think we need to store depth information
- * in this implementation because the depth matches the depth in the
- * tree exactly
- * 
- */
-
-typedef struct pprf_keynode {
-	u32 il;
-	u32 ir;
-	u8 key[PRG_INPUT_LEN];
-#ifdef DEBUG
-	node_label lbl;
-#endif
-} pprf_keynode;
-
-pprf_keynode* master_key;
-int master_key_count; // how many individual keys make up the master key
-int max_master_key_count;
 
 
 void reset_pprf_keynode(pprf_keynode *node) {
@@ -78,7 +24,6 @@ void reset_pprf_keynode(pprf_keynode *node) {
 }
 
 
-void print_pkeynode_debug(node_label* lbl);
 
 /* Returns crypto-safe random bytes from kernel pool. 
    Taken from eraser code */
@@ -315,6 +260,20 @@ int evaluate_at_tag(u64 tag, u8* out) {
 	init_node_label_from_long(&lbl, tag);
 
 	return evaluate(&lbl, out);
+}
+
+
+// Writeback functions
+
+const char *keyfilename = "~holepunch";
+
+int sync_pprf_keynodes(void) {
+
+}
+
+
+int get_pprf_keynodes(void) {
+
 }
 
 
@@ -592,10 +551,12 @@ void puncture_n_times(u64* tag_array, int count) {
 
 void preliminary_benchmark_cycle(void) {
 	init_master_key();
-	pprf_depth = 64;
+	pprf_depth = 17;
 
 	int maxcount = 100000;
 	int count;
+
+	printk(KERN_INFO "Depth = %u, %u reps per eval cycle\n", pprf_depth, maxcount);
 	
 	u64 *tag_array;
 	tag_array = kmalloc_array(maxcount, sizeof(long), GFP_KERNEL);
