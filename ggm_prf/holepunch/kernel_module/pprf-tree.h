@@ -57,9 +57,9 @@ typedef struct pprf_keynode {
 #endif
 } pprf_keynode;
 
-extern pprf_keynode* master_key;
-extern int master_key_count; // how many individual keys make up the master key
-extern int max_master_key_count;
+// extern pprf_keynode* master_key;
+// extern int master_key_count; // how many individual keys make up the master key
+// extern int max_master_key_count;
 
 
 
@@ -71,9 +71,9 @@ int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf);
 bool check_bit_is_set(u8* buf, u8 index);
 void set_bit_in_buf(u8* buf, u8 index, bool val);
 
-int alloc_master_key(pprf_keynode *master_key, u32 *max_master_key_count);
+int alloc_master_key(pprf_keynode **master_key, u32 *max_master_key_count);
 #define EXPANSION_FACTOR 4
-int expand_master_key(pprf_keynode *master_key, u32 *max_master_key_count);
+int expand_master_key(pprf_keynode **master_key, u32 *max_master_key_count);
 void init_master_key(pprf_keynode *master_key, u32 *master_key_count);
 
 void init_node_label_from_bitstring(node_label *lbl, const char* bitstring);

@@ -72,9 +72,9 @@ void set_bit_in_buf(u8* buf, u8 index, bool val) {
 
 // some of these need error returns
 
-int alloc_master_key(pprf_keynode *master_key, u32 *max_master_key_count) {
-	max_master_key_count = 16000;
-	master_key = vmalloc(sizeof(pprf_keynode)*(*max_master_key_count));
+int alloc_master_key(pprf_keynode **master_key, u32 *max_master_key_count) {
+	*max_master_key_count = 16000;
+	*master_key = vmalloc(sizeof(pprf_keynode)*(*max_master_key_count));
     
 	// pprf_depth = MAX_DEPTH;
 	return 0;
@@ -82,7 +82,7 @@ int alloc_master_key(pprf_keynode *master_key, u32 *max_master_key_count) {
 
 #define EXPANSION_FACTOR 4
 
-int expand_master_key(pprf_keynode *master_key, u32 *max_master_key_count) {
+int expand_master_key(pprf_keynode **master_key, u32 *max_master_key_count) {
 #ifdef DEBUG
 	printk("RESIZING: current size = %u\n", *max_master_key_count);
 #endif	
@@ -92,7 +92,7 @@ int expand_master_key(pprf_keynode *master_key, u32 *max_master_key_count) {
 	memcpy(tmp, master_key, sizeof(pprf_keynode) * (*max_master_key_count));
 	vfree(master_key);
 	*max_master_key_count *= EXPANSION_FACTOR;
-	master_key = tmp;
+	*master_key = tmp;
 
 	return 0;
 }
@@ -218,7 +218,7 @@ int puncture(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *tfm,
 
 	// // 4. expand array if necessary
 	if (*master_key_count > *max_master_key_count - MAX_DEPTH*2) 
-		expand_master_key(master_key, master_key_count);
+		expand_master_key(&master_key, master_key_count);
 	
 	return 0;
 }

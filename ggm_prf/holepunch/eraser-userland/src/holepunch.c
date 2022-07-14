@@ -455,7 +455,7 @@ void do_create(char *dev_path, int nv_index) {
     // memset(hp_buf, 0, ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
     hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
 
-    hp_h->master_key_count = 1;
+    hp_h->master_key_count = 0;
     hp_h->max_master_key_count = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
     hp_h->tag = inode_count+1;
     hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
@@ -531,22 +531,22 @@ void do_create(char *dev_path, int nv_index) {
     print_green("%u inodes initialized\n", ino_num);
 #endif
 
-    memset (hp_buf, 0, ERASER_SECTOR_LEN);
-    pprf_keynode *pprf_root = (pprf_keynode *) hp_buf;
-    pprf_root->il = 0;
-    pprf_root->ir = 0;
-    // get_random_data(pprf_root->key, PRG_INPUT_LEN);
-#ifdef ERASER_DEBUG
-	memset(pprf_root->lbl.bstr, 0xcc, NODE_LABEL_LEN);
-	pprf_root->lbl.depth = 0;
-    int i;
-    print_green("PPRF key: ");
-    for (i=0; i< PRG_INPUT_LEN; ++i) {
-        print_green(" %02x", pprf_root->key[i]);
-    }
-    // print_green("fd at sector %u pos %u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, lseek(fd, 0, SEEK_CUR));
-#endif
-    write_sectors(fd, hp_buf, 1);
+//     memset (hp_buf, 0, ERASER_SECTOR_LEN);
+//     pprf_keynode *pprf_root = (pprf_keynode *) hp_buf;
+//     pprf_root->il = 0;
+//     pprf_root->ir = 0;
+//     // get_random_data(pprf_root->key, PRG_INPUT_LEN);
+// #ifdef ERASER_DEBUG
+// 	memset(pprf_root->lbl.bstr, 0xcc, NODE_LABEL_LEN);
+// 	pprf_root->lbl.depth = 0;
+//     int i;
+//     print_green("PPRF key: ");
+//     for (i=0; i< PRG_INPUT_LEN; ++i) {
+//         print_green(" %02x", pprf_root->key[i]);
+//     }
+//     // print_green("fd at sector %u pos %u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, lseek(fd, 0, SEEK_CUR));
+// #endif
+//     write_sectors(fd, hp_buf, 1);
 
 
     // print_red("NOT IMPLEMENTED\n");
