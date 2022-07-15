@@ -37,7 +37,7 @@ void reset_pprf_keynode(pprf_keynode *node) {
 
 /* Returns crypto-safe random bytes from kernel pool. 
    Taken from eraser code */
-static inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len)
+inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len)
 {
 	crypto_get_default_rng();
 	crypto_rng_get_bytes(crypto_default_rng, data, len);
@@ -83,10 +83,11 @@ int alloc_master_key(pprf_keynode **master_key, u32 *max_master_key_count) {
 #define EXPANSION_FACTOR 4
 
 int expand_master_key(pprf_keynode **master_key, u32 *max_master_key_count) {
+	void *tmp;
 #ifdef DEBUG
 	printk("RESIZING: current size = %u\n", *max_master_key_count);
 #endif	
-	void* tmp = vmalloc((*max_master_key_count)*EXPANSION_FACTOR*sizeof(pprf_keynode));
+	tmp = vmalloc((*max_master_key_count)*EXPANSION_FACTOR*sizeof(pprf_keynode));
 	if (!tmp)
 		return -ENOMEM;
 	memcpy(tmp, master_key, sizeof(pprf_keynode) * (*max_master_key_count));
@@ -168,8 +169,12 @@ pprf_keynode *find_key(pprf_keynode *master_key, u8 pprf_depth, node_label *lbl,
 int puncture(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, node_label *lbl) {
 	u32 depth;
-
-	pprf_keynode *root = find_key(master_key, pprf_depth, lbl, &depth);
+	u8 keycpy[PRG_INPUT_LEN];
+	u8 tmp[2*PRG_INPUT_LEN];
+	bool set;
+	pprf_keynode *root;
+	
+	root = find_key(master_key, pprf_depth, lbl, &depth);
 	
 	// it will be NULL if its already been punctured, in which case we just return
 	if (!root)
@@ -177,9 +182,6 @@ int puncture(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *tfm,
 
 	// now we traverse
 	// 2. find all neighbors in path
-	u8 keycpy[PRG_INPUT_LEN];
-	u8 tmp[2*PRG_INPUT_LEN];
-	bool set;
 
 	memcpy(keycpy, root->key, PRG_INPUT_LEN);
 	memset(root->key, 0xcc, PRG_INPUT_LEN);
@@ -240,17 +242,20 @@ int puncture_at_tag(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *t
  */
 int evaluate(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *tfm,
 		u8 pprf_depth, node_label *lbl, u8 *out) {
-#ifdef DEBUG
-	memset(out, 0xcc, PRG_INPUT_LEN);
-#endif
 	u32 depth;
-	pprf_keynode *root = find_key(master_key, pprf_depth, lbl, &depth);
-	if (!root) 
-		return -1;
-
 	u8 keycpy[PRG_INPUT_LEN];
 	u8 tmp[2*PRG_INPUT_LEN];
 	bool set;
+	pprf_keynode *root; 
+	
+#ifdef DEBUG
+	memset(out, 0xcc, PRG_INPUT_LEN);
+#endif
+
+	root = find_key(master_key, pprf_depth, lbl, &depth);
+	if (!root) 
+		return -1;
+
 	memcpy(keycpy, root->key, PRG_INPUT_LEN);
 
 	for (; depth<pprf_depth; ++depth) {
@@ -282,7 +287,7 @@ int evaluate_at_tag(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *t
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 	u64 bit;
     int i;
-	u64 value = 0;
+	// u64 value = 0;
 	memset(node_label_str, '\0', len);
 	
 	if (lbl->depth == 0) {
@@ -292,7 +297,7 @@ void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 		for (i=0; i<lbl->depth; ++i) {
 			bit = check_bit_is_set(lbl->bstr, i);
 			node_label_str[i] = bit ? '1' : '0';
-			value += bit << i;
+			// value += bit << i;
 		}
 		// snprintf(node_label_str + lbl->depth + 1, len - lbl->depth, "(%llu)", value);
 	}
@@ -303,14 +308,15 @@ void print_pkeynode_debug(pprf_keynode *master_key, u8 pprf_depth, node_label *l
     // terrible terrible stringy stuff
 	int depth;
     char node_label_str[8*NODE_LABEL_LEN+21];
+	pprf_keynode *pkey;
 
 	label_to_string(lbl, node_label_str, 8*NODE_LABEL_LEN+21);
-	pprf_keynode *pkey = find_key(master_key, pprf_depth, lbl, &depth);
+	pkey = find_key(master_key, pprf_depth, lbl, &depth);
 
 	printk(" Finding key for label %s ...\n", node_label_str);
 	if (pkey) {
 		label_to_string(&pkey->lbl, node_label_str, 8*NODE_LABEL_LEN+21);
-		printk(KERN_INFO "PPRF KEY: %016ph, label: %s, depth: %d\n"
+		printk(KERN_INFO "PPRF KEY: %16ph, label: %s, depth: %d\n"
 				, pkey->key, node_label_str, pkey->lbl.depth);
 	} else {
 		printk(KERN_INFO "Key not present\n");
@@ -319,14 +325,20 @@ void print_pkeynode_debug(pprf_keynode *master_key, u8 pprf_depth, node_label *l
 
 
 void print_master_key(pprf_keynode *master_key, u32 *master_key_count) {
-	int i;
-	char node_label_str[8*NODE_LABEL_LEN+21];
+	u32 i;
+	char node_label_str[8*NODE_LABEL_LEN+1];
 
-	printk(KERN_INFO ": Master key dump START:\n");
-	for (i=0; i<*master_key_count; ++i) {
-		label_to_string(&master_key[i].lbl, node_label_str, 8*NODE_LABEL_LEN+21);
-		printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%016ph, label:%s\n",
+	printk(KERN_INFO ": Master key dump START, len=%u:\n", *master_key_count);
+	i=0;
+	for (; i<*master_key_count; ++i) {
+		label_to_string(&master_key[i].lbl, node_label_str, 8*NODE_LABEL_LEN+1);
+		printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%16ph, label:%s\n",
 			i, master_key[i].il, master_key[i].ir, master_key[i].key, node_label_str);
+		// printk(KERN_INFO "n:%u, ", i);
+		// printk(KERN_CONT "il:%u, ", master_key[i].il);
+		// printk(KERN_CONT "ir:%u, ", master_key[i].ir);
+		// printk(KERN_CONT "key:%16ph, ", master_key[i].key);
+		// printk(KERN_CONT "label:%s\n", node_label_str);
 	}
 
 	printk(KERN_INFO ": END Master key dump\n");
@@ -445,11 +457,11 @@ void print_master_key(pprf_keynode *master_key, u32 *master_key_count) {
 // 	u8 out[PRG_INPUT_LEN];
 
 // 	r = evaluate_at_tag(0, out);
-// 	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 0: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // 	r = evaluate_at_tag(1, out);
-// 	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 1: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // 	r = evaluate_at_tag(255, out);
-// 	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 255: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 
 // 	printk(KERN_INFO "Puncturing tag=1...\n");
 // 	r = puncture_at_tag(1);
@@ -457,11 +469,11 @@ void print_master_key(pprf_keynode *master_key, u32 *master_key_count) {
 // 	print_master_key();
 
 // 	r = evaluate_at_tag(0, out);
-// 	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 0: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // 	r = evaluate_at_tag(1, out);
-// 	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 1: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // 	r = evaluate_at_tag(255, out);
-// 	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 255: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 
 // 	printk(KERN_INFO "Puncturing tag=0...\n");
 // 	r = puncture_at_tag(0);
@@ -469,11 +481,11 @@ void print_master_key(pprf_keynode *master_key, u32 *master_key_count) {
 // 	print_master_key();
 
 // 	r = evaluate_at_tag(0, out);
-// 	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 0: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // 	r = evaluate_at_tag(1, out);
-// 	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 1: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // 	r = evaluate_at_tag(255, out);
-// 	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+// 	printk(KERN_INFO "Evaluation at tag 255: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 // }
 
 // void test_evaluate_1(void) {
@@ -490,7 +502,7 @@ void print_master_key(pprf_keynode *master_key, u32 *master_key_count) {
 // 		for (i=0; i<16; ++i) {
 // 			r = evaluate_at_tag(i, out);
 // 			BUG_ON(unlikely(r && i>rd));
-// 			printk(KERN_INFO "Evaluation at tag %u: %s (%016ph)\n", i, r == 0?"SUCCESS" :"PUNCTURED", out);
+// 			printk(KERN_INFO "Evaluation at tag %u: %s (%16ph)\n", i, r == 0?"SUCCESS" :"PUNCTURED", out);
 // 		}
 // 	}
 

@@ -64,7 +64,7 @@ typedef struct pprf_keynode {
 
 
 void reset_pprf_keynode(pprf_keynode *node);
-static inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len);
+inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len);
 
 int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf);
 

@@ -21,260 +21,7 @@
  * ERASER device-mapper target.
  */
 
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/blkdev.h>
-#include <linux/bio.h>
-#include <linux/slab.h>
-#include <linux/device-mapper.h>
-#include <linux/dm-io.h>
-#include <linux/semaphore.h>
-#include <linux/completion.h>
-#include <linux/crypto.h>
-#include <crypto/hash.h>
-#include <linux/scatterlist.h>
-#include <crypto/rng.h>
-#include <linux/workqueue.h>
-#include <linux/list.h>
-#include <linux/kfifo.h>
-#include <linux/delay.h>
-#include <linux/fs.h>
-#include <linux/proc_fs.h>
-#include <linux/seq_file.h>
-#include <linux/kprobes.h>
-#include <linux/vmalloc.h>
-#include <linux/kthread.h>
-#include <net/sock.h>
-#include <linux/netlink.h>
-/* #include <net/genetlink.h> */
-#include <linux/skbuff.h>
-
-#include "pprf-tree.h"
-
-#define DM_MSG_PREFIX "eraser"
-
-#define ERASER_SECTOR 4096   /* In bytes. */
-#define ERASER_HW_SECTOR 512 /* In bytes. */
-#define ERASER_SECTOR_SCALE (ERASER_SECTOR / ERASER_HW_SECTOR)
-
-#define ERASER_HEADER_LEN 1  /* In blocks. */
-#define ERASER_KEY_LEN 32    /* In bytes. */
-#define ERASER_IV_LEN 16     /* In bytes. */
-#define ERASER_SALT_LEN 32   /* In bytes. */
-#define ERASER_DIGEST_LEN 32 /* In bytes. */
-#define ERASER_NAME_LEN 16   /* ERASER instance name. */
-
-/* Crypto operations. */
-#define ERASER_ENCRYPT 1
-#define ERASER_DECRYPT 2
-
-/* Cache flags & constants. */
-#define ERASER_CACHE_DIRTY       0x000000001
-
-/*
- * Memory pools.
- * TODO: These are quite large, could be reduced later after a
- * proper analysis of the actual requirements.
- */
-#define ERASER_BIOSET_SIZE 1024
-#define ERASER_PAGE_POOL_SIZE 1024
-#define ERASER_IO_WORK_POOL_SIZE 1024
-#define ERASER_UNLINK_WORK_POOL_SIZE 1024
-#define ERASER_MAP_CACHE_POOL_SIZE 1024
-#define ERASER_MAP_CACHE_FULL ERASER_MAP_CACHEPOOL_SIZE
-
-/* Return codes. */
-#define ERASER_SUCCESS 0
-#define ERASER_ERROR 1
-
-/* /proc file listing mapped ERASER devices. */
-#define ERASER_PROC_FILE "erasertab"
-
-
-typedef struct holepunch_filekey_entry {
-	u64 tag;
-	u8 key[ERASER_KEY_LEN];
-	u8 iv[ERASER_IV_LEN];
-	u64 padding;
-} holepunch_filekey_entry;
-
-/* ERASER header. Must match the definition in the user space. */
-typedef struct holepunch_header {
-	// not sure what to do with all theses
-	u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
-	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
-	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
-	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
-
-	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
-		       * kernel side. */
-
-	/* All in ERASER sectors. */
-	u64 len;
-	u64 key_table_start;
-	u64 key_table_len;
-	u64 pprf_key_start;
-	u64 pprf_key_len;
-	u64 data_start;
-	u64 data_len;
-
-	u8 pprf_depth;
-	u32 master_key_count; // how many individual keys make up the master key
-	u32 max_master_key_count;
-	u64 tag;
-
-	u8 prg_iv[PRG_INPUT_LEN];
-} holepunch_header;
-
-
-/*
- * Map entry and cache structs.
- */
-/* Size padded to 64 bytes, must be multiple of sector size. */
-struct eraser_map_entry {
-	u8 key[ERASER_KEY_LEN];
-	u8 iv[ERASER_IV_LEN];
-	u64 status;
-	u64 padding;
-};
-
-#define ERASER_MAP_CACHE_BUCKETS 1024
-#define ERASER_MAP_PER_SECTOR 64
-
-struct eraser_map_cache {
-	u64 slot_no;
-	u64 status;
-	unsigned long last_dirty;
-	unsigned long last_access;
-	unsigned long first_access;
-	struct eraser_map_entry *map;
-	struct list_head list;
-};
-
-/*
- * Random data generation with AES-CTR.
- */
-/* Refresh keys after generating this much data. */
-#define ERASER_PRNG_AESCTR_REFRESH_LEN 1048576 /* In bytes. */ /* 1 MB */
-#define ERASER_PRNG_AESCTR_CHUNK_LEN 1  /* No of chunks to generate the data in. */
-
-/*
- * Context for random data generation.
- */
-struct eraser_rand_context {
-	u8 *buf;
-	u64 max_chunk;
-	u64 cur_chunk;
-	u64 max_byte;
-	u64 cur_byte;
-	struct crypto_blkcipher *tfm;
-};
-
-/* Master key status flags. */
-enum {
-	ERASER_KEY_GOT_KEY = 1,
-	ERASER_KEY_GET_REQUESTED,
-	ERASER_KEY_SET_REQUESTED,
-	ERASER_KEY_SLOT_MAP_DIRTY,
-	ERASER_KEY_READY_TO_REFRESH,
-};
-
-/* Represents a ERASER instance. */
-struct eraser_dev {
-	char eraser_name[ERASER_NAME_LEN + 1]; /* Instance name. */
-	struct dm_dev *real_dev;           /* Underlying block device. */
-	dev_t virt_dev;                    /* Virtual device-mapper node. */
-	u8 *real_dev_path;
-	u8 *virt_dev_path;
-
-	u8 *enc_key;                       /* Sector encryption key. */
-	u8 master_key[ERASER_KEY_LEN];       /* File encryption master key. */
-	u8 new_master_key[ERASER_KEY_LEN];   /* Temporary key before syncing to TPM. */
-	struct completion master_key_wait;
-	unsigned long master_key_status;   /* Key status flags. */
-	int helper_pid;                    /* Netlink talks to this pid. */
-
-	struct eraser_header *rh;            /* Header, basic metadata. */
-	holepunch_header *hp_h;
-
-	pprf_keynode* pprf_master_key;
-	u32 pprf_master_key_capacity;
-	
-
-	struct eraser_map_entry *slot_map;   /* In-memory slot map. */
-	holepunch_filekey_entry *key_table;
-	struct list_head map_cache_list[ERASER_MAP_CACHE_BUCKETS];
-	u64 map_cache_count;
-	struct task_struct *evict_map_cache_thread;
-
-	/* Per CPU crypto transforms for everything. We go full parallel. */
-	unsigned cpus;
-	struct crypto_blkcipher **tfm;    /* Sector and file encryption. */
-	struct eraser_rand_context *rand;   /* AES-CTR context for random data. */
-	struct crypto_cipher **essiv_tfm; /* IV derivation for sector encryption. */
-
-	/* Work queues. */
-	struct workqueue_struct *io_queue;
-	struct workqueue_struct *unlink_queue;
-
-	/* Memory pools. */
-	struct bio_set *bioset;
-	mempool_t *page_pool;
-	struct kmem_cache *_io_work_pool;
-	mempool_t *io_work_pool;
-	struct kmem_cache *_unlink_work_pool;
-	mempool_t *unlink_work_pool;
-	struct kmem_cache *_map_cache_pool;
-	mempool_t *map_cache_pool;
-
-	/* Locks. */
-	struct semaphore cache_lock[ERASER_MAP_CACHE_BUCKETS];
-
-	struct list_head list;
-};
-static LIST_HEAD(eraser_dev_list); /* We keep all ERASERs in a list. */
-static DEFINE_SEMAPHORE(eraser_dev_lock);
-
-
-
-
-/* ERASER header. Must match the definition in the user space. */
-struct eraser_header {
-
-	u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
-	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
-	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
-	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
-
-	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
-		       * kernel side. */
-
-	/* All in ERASER sectors. */
-	u64 len;
-	u64 slot_map_start;
-	u64 slot_map_len;
-	u64 inode_map_start;
-	u64 inode_map_len;
-	u64 data_start;
-	u64 data_len;
-};
-
-/* Represents an IO operation in flight. */
-struct eraser_io_work {
-        struct eraser_dev *rd;
-        struct bio *bio;
-	unsigned is_file;
-        struct work_struct work;
-};
-
-/* Represents an unlink operation in flight. */
-struct eraser_unlink_work {
-        struct eraser_dev *rd;
-	unsigned long inode_no;
-        struct work_struct work;
-};
+#include "dm-holepunch-main.h"
 
 /* Decodes a hex encoded byte string. */
 static u8 *eraser_hex_decode(u8 *hex)
@@ -422,17 +169,17 @@ static inline void eraser_free_unlink_work(struct eraser_unlink_work *w)
 	mempool_free(w, w->rd->unlink_work_pool);
 }
 
-static struct eraser_map_cache *eraser_allocate_map_cache(struct eraser_dev *rd)
-{
-	struct eraser_map_cache *c;
+// static struct eraser_map_cache *eraser_allocate_map_cache(struct eraser_dev *rd)
+// {
+// 	struct eraser_map_cache *c;
 
-	c = mempool_alloc(rd->map_cache_pool, GFP_NOIO);
-	if (!c)
-		DMCRIT("Cannot allocate new map cache!");
+// 	c = mempool_alloc(rd->map_cache_pool, GFP_NOIO);
+// 	if (!c)
+// 		DMCRIT("Cannot allocate new map cache!");
 
-	memset(c, 0, sizeof(*c));
-	return c;
-}
+// 	memset(c, 0, sizeof(*c));
+// 	return c;
+// }
 
 static inline void eraser_free_map_cache(struct eraser_map_cache *c, struct eraser_dev *rd)
 {
@@ -821,9 +568,9 @@ static pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd) {
 
 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
 #ifdef DEBUG
-	printk(KERN_INFO "Reading PPRF key: decrypting wih K = %032ph\n", rd->master_key);
+	printk(KERN_INFO "Reading PPRF key: decrypting wih K = %32ph\n", rd->master_key);
 #endif
-	map = vmalloc(ERASER_SECTOR * DIV_ROUND_UP(rd->hp_h->master_key_count, sizeof(pprf_keynode));
+	map = vmalloc(ERASER_SECTOR * DIV_ROUND_UP(rd->hp_h->master_key_count, sizeof(pprf_keynode)));
 	if (!map)
 		return NULL;
 
@@ -833,7 +580,6 @@ static pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd) {
 		data = eraser_rw_sector(sector + rd->hp_h->pprf_key_start,
 			READ, NULL, rd);
 		if (unlikely(!sector)) {
-			printk(KERN_INFO "Master key at %p\n", rd->master_key);
 			eraser_do_crypto_from_buffer(data, ERASER_SECTOR, rd->master_key, 
 				iv, tfm, ERASER_DECRYPT, rd);
 		}
@@ -846,6 +592,11 @@ static pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd) {
 	return (pprf_keynode *) map;
 }
 
+/* This has to:
+ * 1. Reroll a new TPM key, writing it to the TPM
+ * 2. Encrypt the pprf key with the new TPM key and write to disk
+ * Crash consistency - this whole thing probably has to be atomic
+ */
 static void holepunch_write_pprf_key(struct eraser_dev *rd) {
 	struct crypto_blkcipher *tfm;
 	char *map;
@@ -853,14 +604,28 @@ static void holepunch_write_pprf_key(struct eraser_dev *rd) {
 	u8 iv[ERASER_IV_LEN];
 	memset(iv, 0, ERASER_IV_LEN);
 
+	eraser_get_random_bytes_kernel(rd->new_master_key, ERASER_KEY_LEN);
+	__set_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status);
+	while (eraser_set_master_key(rd)) {
+		DMCRIT("Holepunch cannot set new TPM key...\n");
+		msleep(100);
+	}
+	while (!test_and_clear_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status)) {
+		DMCRIT("Waiting for new key to be set.");
+		wait_for_completion_timeout(&rd->master_key_wait, 3 * HZ);
+	}
+	memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
+
 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
 #ifdef DEBUG
-	printk(KERN_INFO "writing PPRF key: encrypting wih K = %032ph\n", rd->master_key);
+	printk(KERN_INFO "writing PPRF key: encrypting wih K = %32ph\n", rd->master_key);
 #endif
 	map = kmalloc(ERASER_SECTOR, GFP_KERNEL);
-	if (!map)
+	if (!map) {
+		printk("OOM!\n");
 		// This should not fail silently...
-		return NULL;
+		return;
+	}
 
 	for (sector = 0; 
 			sector < DIV_ROUND_UP(rd->hp_h->master_key_count, sizeof(pprf_keynode));
@@ -890,80 +655,80 @@ static void holepunch_write_pprf_key(struct eraser_dev *rd) {
  * have a better optimized one exploiting the fact that they are always single
  * sector reads.
  */
-static struct eraser_map_entry *eraser_read_slot_map(u64 start, u64 len, u8 *key, u8 *iv, struct eraser_dev *rd)
-{
-	struct crypto_blkcipher *tfm;
-	char *data;
-	char *map;
-	u64 i;
+// static struct eraser_map_entry *eraser_read_slot_map(u64 start, u64 len, u8 *key, u8 *iv, struct eraser_dev *rd)
+// {
+// 	struct crypto_blkcipher *tfm;
+// 	char *data;
+// 	char *map;
+// 	u64 i;
 
-	/* Use a fresh tfm so that nothing breaks if this code gets scheduled on
-	 * different CPUs. */
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
+// 	/* Use a fresh tfm so that nothing breaks if this code gets scheduled on
+// 	 * different CPUs. */
+// 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
 
-	/* Could be big. */
-	map = vmalloc(len * ERASER_SECTOR);
+// 	/* Could be big. */
+// 	map = vmalloc(len * ERASER_SECTOR);
 
-	/* Do crypto in chunks. Crypto API cannot work on vmalloc'd regions! */
-	data = eraser_rw_sector(start, READ, NULL, rd);
-	eraser_do_crypto_from_buffer(data, ERASER_SECTOR, key, iv, tfm, ERASER_DECRYPT, rd);
-	memcpy(map, data, ERASER_SECTOR);
-	eraser_free_sector(data, rd);
+// 	/* Do crypto in chunks. Crypto API cannot work on vmalloc'd regions! */
+// 	data = eraser_rw_sector(start, READ, NULL, rd);
+// 	eraser_do_crypto_from_buffer(data, ERASER_SECTOR, key, iv, tfm, ERASER_DECRYPT, rd);
+// 	memcpy(map, data, ERASER_SECTOR);
+// 	eraser_free_sector(data, rd);
 
-	for (i = 1; i < len; ++i) {
-		data = eraser_rw_sector(start + i, READ, NULL, rd);
-		eraser_do_crypto_from_buffer(data, ERASER_SECTOR, NULL, NULL, tfm, ERASER_DECRYPT, rd);
-		memcpy(map + (i * ERASER_SECTOR), data, ERASER_SECTOR);
-		eraser_free_sector(data, rd);
-}
+// 	for (i = 1; i < len; ++i) {
+// 		data = eraser_rw_sector(start + i, READ, NULL, rd);
+// 		eraser_do_crypto_from_buffer(data, ERASER_SECTOR, NULL, NULL, tfm, ERASER_DECRYPT, rd);
+// 		memcpy(map + (i * ERASER_SECTOR), data, ERASER_SECTOR);
+// 		eraser_free_sector(data, rd);
+// }
 
-	crypto_free_blkcipher(tfm);
+// 	crypto_free_blkcipher(tfm);
 
-	return (struct eraser_map_entry *) map;
-}
+// 	return (struct eraser_map_entry *) map;
+// }
 
 /* Writes the slot map back to disk. */
-static void eraser_write_slot_map(struct eraser_map_entry *slot_map, u64 start, u64 len,
-				u8 *key, u8 *iv, struct eraser_dev *rd)
-{
-	struct crypto_blkcipher *tfm;
-	struct page *p;
-	char *map = (char *) slot_map;
-	char *data;
-	u64 i;
+// static void eraser_write_slot_map(struct eraser_map_entry *slot_map, u64 start, u64 len,
+// 				u8 *key, u8 *iv, struct eraser_dev *rd)
+// {
+// 	struct crypto_blkcipher *tfm;
+// 	struct page *p;
+// 	char *map = (char *) slot_map;
+// 	char *data;
+// 	u64 i;
 
-	/* Use a fresh tfm so that nothing breaks if this code gets scheduled on
-	 * different CPUs. */
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
-	p = eraser_allocate_page(rd);
-	data = kmap(p);
+// 	/* Use a fresh tfm so that nothing breaks if this code gets scheduled on
+// 	 * different CPUs. */
+// 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
+// 	p = eraser_allocate_page(rd);
+// 	data = kmap(p);
 
-	/* Do crypto in chunks. Crypto API cannot work on vmalloc'd regions! */
-	memcpy(data, map, ERASER_SECTOR);
-	eraser_do_crypto_from_buffer(data, ERASER_SECTOR, key, iv, tfm, ERASER_ENCRYPT, rd);
-	eraser_rw_sector(start, WRITE, data, rd);
+// 	/* Do crypto in chunks. Crypto API cannot work on vmalloc'd regions! */
+// 	memcpy(data, map, ERASER_SECTOR);
+// 	eraser_do_crypto_from_buffer(data, ERASER_SECTOR, key, iv, tfm, ERASER_ENCRYPT, rd);
+// 	eraser_rw_sector(start, WRITE, data, rd);
 
-	for (i = 1; i < len; ++i) {
-		memcpy(data, map + (i * ERASER_SECTOR), ERASER_SECTOR);
-		eraser_do_crypto_from_buffer(data, ERASER_SECTOR, NULL, NULL, tfm, ERASER_ENCRYPT, rd);
-		eraser_rw_sector(start + i, WRITE, data, rd);
-	}
+// 	for (i = 1; i < len; ++i) {
+// 		memcpy(data, map + (i * ERASER_SECTOR), ERASER_SECTOR);
+// 		eraser_do_crypto_from_buffer(data, ERASER_SECTOR, NULL, NULL, tfm, ERASER_ENCRYPT, rd);
+// 		eraser_rw_sector(start + i, WRITE, data, rd);
+// 	}
 
-	kunmap(p);
-	eraser_free_page(p, rd);
+// 	kunmap(p);
+// 	eraser_free_page(p, rd);
 
-	crypto_free_blkcipher(tfm);
-}
+// 	crypto_free_blkcipher(tfm);
+// }
 
-static inline u64 eraser_get_inode_offset(unsigned long inode_no)
-{
-	return inode_no % ERASER_MAP_PER_SECTOR;
-}
+// static inline u64 eraser_get_inode_offset(unsigned long inode_no)
+// {
+// 	return inode_no % ERASER_MAP_PER_SECTOR;
+// }
 
-static inline u64 eraser_get_slot_no(unsigned long inode_no)
-{
-	return inode_no / ERASER_MAP_PER_SECTOR;
-}
+// static inline u64 eraser_get_slot_no(unsigned long inode_no)
+// {
+// 	return inode_no / ERASER_MAP_PER_SECTOR;
+// }
 
 /* Drop a cache entry. Lock from outside. */
 static inline void eraser_drop_map_cache(struct eraser_map_cache *c, struct eraser_dev *rd)
@@ -1080,76 +845,76 @@ static int eraser_evict_map_cache(void *data)
 }
 
 /* Search the cache for given keys. Lock from outside. */
-static struct eraser_map_cache *eraser_search_map_cache(u64 slot_no, int bucket, struct eraser_dev *rd)
-{
-	struct eraser_map_cache *c;
+// static struct eraser_map_cache *eraser_search_map_cache(u64 slot_no, int bucket, struct eraser_dev *rd)
+// {
+// 	struct eraser_map_cache *c;
 
-	list_for_each_entry(c, &rd->map_cache_list[bucket], list) {
-		if (c->slot_no == slot_no) {
-			c->last_access = jiffies;
-			return c;
-		}
-	}
+// 	list_for_each_entry(c, &rd->map_cache_list[bucket], list) {
+// 		if (c->slot_no == slot_no) {
+// 			c->last_access = jiffies;
+// 			return c;
+// 		}
+// 	}
 
-	return NULL; /* Not found. */
-}
+// 	return NULL; /* Not found. */
+// }
 
 /* Read from disk the given keys, and cache. Lock from outside. */
-static struct eraser_map_cache *eraser_cache_map(u64 slot_no, int bucket, struct eraser_dev *rd)
-{
-	struct eraser_map_cache *c;
+// static struct eraser_map_cache *eraser_cache_map(u64 slot_no, int bucket, struct eraser_dev *rd)
+// {
+// 	struct eraser_map_cache *c;
 
-	/* Read map entries from disk. */
-	c = eraser_allocate_map_cache(rd);
-	c->map = eraser_rw_sector(rd->rh->inode_map_start + slot_no, READ, NULL, rd);
-	eraser_do_crypto_from_buffer((char *)c->map, ERASER_SECTOR,
-				rd->slot_map[slot_no].key, rd->slot_map[slot_no].iv,
-				NULL, ERASER_DECRYPT, rd);
+// 	/* Read map entries from disk. */
+// 	c = eraser_allocate_map_cache(rd);
+// 	c->map = eraser_rw_sector(rd->rh->inode_map_start + slot_no, READ, NULL, rd);
+// 	eraser_do_crypto_from_buffer((char *)c->map, ERASER_SECTOR,
+// 				rd->slot_map[slot_no].key, rd->slot_map[slot_no].iv,
+// 				NULL, ERASER_DECRYPT, rd);
 
-	/* Set up the rest of the cache entry. */
-	c->slot_no = slot_no;
-	c->status = 0;
-	c->first_access = jiffies;
-	c->last_access = jiffies;
+// 	/* Set up the rest of the cache entry. */
+// 	c->slot_no = slot_no;
+// 	c->status = 0;
+// 	c->first_access = jiffies;
+// 	c->last_access = jiffies;
 
-	/* Add to cache. */
-	INIT_LIST_HEAD(&c->list);
-	list_add(&c->list, &rd->map_cache_list[bucket]);
-	rd->map_cache_count += 1;
+// 	/* Add to cache. */
+// 	INIT_LIST_HEAD(&c->list);
+// 	list_add(&c->list, &rd->map_cache_list[bucket]);
+// 	rd->map_cache_count += 1;
 
-	return c;
-}
+// 	return c;
+// }
 
 /* Retrieve the inode metadata from disk or cache. */
-static void eraser_get_inode_map_entry(unsigned long inode_no, struct eraser_dev *rd, struct eraser_map_entry *out)
-{
-	struct eraser_map_cache *c;
-	u64 slot_no;
-	int bucket;
+// static void eraser_get_inode_map_entry(unsigned long inode_no, struct eraser_dev *rd, struct eraser_map_entry *out)
+// {
+// 	struct eraser_map_cache *c;
+// 	u64 slot_no;
+// 	int bucket;
 
-	slot_no = eraser_get_slot_no(inode_no);
-	bucket = slot_no % ERASER_MAP_CACHE_BUCKETS;
+// 	slot_no = eraser_get_slot_no(inode_no);
+// 	bucket = slot_no % ERASER_MAP_CACHE_BUCKETS;
 
-	down(&rd->cache_lock[bucket]);
-	c = eraser_search_map_cache(slot_no, bucket, rd);
-	if (!c) {
-		c = eraser_cache_map(slot_no, bucket, rd);
-	}
+// 	down(&rd->cache_lock[bucket]);
+// 	c = eraser_search_map_cache(slot_no, bucket, rd);
+// 	if (!c) {
+// 		c = eraser_cache_map(slot_no, bucket, rd);
+// 	}
 
-	/* Return a copy of the inode map entry. */
-	memcpy(out, &c->map[eraser_get_inode_offset(inode_no)], sizeof(*out));
-	up(&rd->cache_lock[bucket]);
-}
+// 	/* Return a copy of the inode map entry. */
+// 	memcpy(out, &c->map[eraser_get_inode_offset(inode_no)], sizeof(*out));
+// 	up(&rd->cache_lock[bucket]);
+// }
 
 /* Get the inode key and iv. */
-static void eraser_get_key_for_inode(unsigned long inode_no, u8 *key, u8 *iv, struct eraser_dev *rd)
-{
-	struct eraser_map_entry inode_map;
+// static void eraser_get_key_for_inode(unsigned long inode_no, u8 *key, u8 *iv, struct eraser_dev *rd)
+// {
+// 	struct eraser_map_entry inode_map;
 
-	eraser_get_inode_map_entry(inode_no, rd, &inode_map);
-	memcpy(key, inode_map.key, ERASER_KEY_LEN);
-	memcpy(iv, inode_map.iv, ERASER_IV_LEN);
-}
+// 	eraser_get_inode_map_entry(inode_no, rd, &inode_map);
+// 	memcpy(key, inode_map.key, ERASER_KEY_LEN);
+// 	memcpy(iv, inode_map.iv, ERASER_IV_LEN);
+// }
 
 static void holepunch_get_key_for_inode(unsigned long inode_no, u8 *key, u8 *iv, struct eraser_dev *rd) {
 	u8 buf[ERASER_KEY_LEN + ERASER_IV_LEN];
@@ -1165,7 +930,7 @@ static void holepunch_get_key_for_inode(unsigned long inode_no, u8 *key, u8 *iv,
 	memset(iv_0, 0, PRG_INPUT_LEN);
 
 #ifdef DEBUG
-	printk(KERN_INFO "PPRF output for ino %u, tag %u: %016ph \n", 
+	printk(KERN_INFO "PPRF output for ino %lu, tag %llu: %16ph \n", 
 		inode_no, rd->key_table[inode_no].tag, pprf_out);
 #endif
 
@@ -1237,7 +1002,7 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w)
 			key, iv, w->rd);
 
 #ifdef DEBUG
-		printk(KERN_INFO "WRITE: Crypto info for inode %u:\n\t\t key = %032ph\n\t\t iv = %016ph\n",
+		printk(KERN_INFO "WRITE: Crypto info for inode %lu:\n\t\t key = %32ph\n\t\t iv = %16ph\n",
 			bio_iter_iovec(w->bio, w->bio->bi_iter).bv_page->mapping->host->i_ino,
 			key, iv);
 #endif
@@ -1292,7 +1057,7 @@ static void eraser_do_read_bottomhalf(struct eraser_io_work *w)
 			bio_iter_iovec(w->bio, w->bio->bi_iter).bv_page->mapping->host->i_ino,
 			key, iv, w->rd);
 #ifdef DEBUG
-		printk(KERN_INFO "READ: Crypto info for inode %u:\n\t\t key = %032ph\n\t\t iv = %016ph\n",
+		printk(KERN_INFO "READ: Crypto info for inode %lu:\n\t\t key = %32ph\n\t\t iv = %16ph\n",
 			bio_iter_iovec(w->bio, w->bio->bi_iter).bv_page->mapping->host->i_ino,
 			key, iv);
 #endif
@@ -1381,9 +1146,9 @@ static void holepunch_do_unlink(struct work_struct *work) {
 
 	/* rerolling the slot */
 #ifdef DEBUG
-	printk(KERN_INFO "Old file key entry\n\t\t tag: %u\n"
-					 "\t\t(Encrypted) key : %032ph\n"
-					 "\t\t(Encrypted) iv : %016ph\n",
+	printk(KERN_INFO "Old file key entry\n\t\t tag: %llu\n"
+					 "\t\t(Encrypted) key : %32ph\n"
+					 "\t\t(Encrypted) iv : %16ph\n",
 					 w->rd->key_table[w->inode_no].tag, w->rd->key_table[w->inode_no].key,
 					 w->rd->key_table[w->inode_no].iv);
 #endif
@@ -1392,9 +1157,9 @@ static void holepunch_do_unlink(struct work_struct *work) {
 	w->rd->key_table[w->inode_no].tag = w->rd->hp_h->tag;
 	++w->rd->hp_h->tag;
 #ifdef DEBUG
-	printk(KERN_INFO "New file key entry\n\t\t tag: %u\n"
-					 "\t\t(Encrypted) key : %032ph\n"
-					 "\t\t(Encrypted) iv : %016ph\n",
+	printk(KERN_INFO "New file key entry\n\t\t tag: %llu\n"
+					 "\t\t(Encrypted) key : %32ph\n"
+					 "\t\t(Encrypted) iv : %16ph\n",
 					 w->rd->key_table[w->inode_no].tag, w->rd->key_table[w->inode_no].key,
 					 w->rd->key_table[w->inode_no].iv);
 #endif
@@ -1403,12 +1168,7 @@ static void holepunch_do_unlink(struct work_struct *work) {
 	 * Currently sync
 	 */
 	eraser_rw_sector(0, WRITE, w->rd->hp_h, w->rd);
-	// these are likely the problem lines... but how?
 	sectorno = w->inode_no/sizeof(holepunch_filekey_entry);
-	// eraser_rw_sector(w->rd->hp_h->key_table_start + sectorno,
-	// 	WRITE, (char*) w->rd->key_table + sectorno*ERASER_SECTOR, w->rd);
-	// eraser_rw_sector(w->rd->hp_h->key_table_start + sectorno,
-	// 	WRITE, w->rd->hp_h, w->rd);
 	holepunch_write_key_table_entry(w->rd, sectorno);
 	holepunch_write_pprf_key(w->rd);
 	eraser_free_unlink_work(w);
@@ -1921,11 +1681,11 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	printk(KERN_INFO "PPRF key start: %llu\n", rd->hp_h->pprf_key_start);
 	printk(KERN_INFO "PPRF key sectors: %llu\n", rd->hp_h->pprf_key_len);
-	printk(KERN_INFO "PPRF key length: %llu/%llu\n", rd->hp_h->master_key_count, rd->hp_h->max_master_key_count);
+	printk(KERN_INFO "PPRF key length: %u/%u\n", rd->hp_h->master_key_count, rd->hp_h->max_master_key_count);
 
 	printk(KERN_INFO "Data start: %llu\n", rd->hp_h->data_start);
 	printk(KERN_INFO "Data sectors: %llu\n", rd->hp_h->data_len);
-	printk(KERN_INFO "PRG IV %016ph\n", rd->hp_h->prg_iv);
+	printk(KERN_INFO "PRG IV %16ph\n", rd->hp_h->prg_iv);
 #endif
 
 	/* We have per-cpu crypto transforms. */
@@ -2053,7 +1813,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto read_slot_map_fail;
 	}
 #ifdef DEBUG
-	printk(KERN_INFO "%032ph\n%016ph\n", (rd->key_table)[0].key, (rd->key_table)[0].iv);
+	printk(KERN_INFO "%32ph\n%16ph\n", (rd->key_table)[0].key, (rd->key_table)[0].iv);
 #endif
 	if (unlikely(rd->hp_h->master_key_count == 0)) {
 #ifdef DEBUG
@@ -2180,6 +1940,7 @@ static void eraser_dtr(struct dm_target *ti)
 				* here. Just use old key, set a flag in the
 				* header. */
 	if (test_bit(ERASER_KEY_SLOT_MAP_DIRTY, &rd->master_key_status)) {
+		printk(KERN_INFO "Why is the slot map dirty??\n");
 		eraser_get_random_key(rd->new_master_key, rd);
 		__set_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status);
 		while (eraser_set_master_key(rd) != ERASER_SUCCESS) {
@@ -2194,7 +1955,6 @@ static void eraser_dtr(struct dm_target *ti)
 		DMCRIT("New key set.");
 		memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
 	}
-	eraser_kill_helper(rd);
 
 	/* Write back slot map. New master key was made ready above. */
 	// if (__test_and_clear_bit(ERASER_KEY_SLOT_MAP_DIRTY, &rd->master_key_status)) {
@@ -2207,6 +1967,7 @@ static void eraser_dtr(struct dm_target *ti)
 
 	/* Keys no longer needed, wipe them. */
 	holepunch_write_pprf_key(rd);
+	eraser_kill_helper(rd);
 	memset(rd->new_master_key, 0, ERASER_KEY_LEN);
 	memset(rd->master_key, 0, ERASER_KEY_LEN);
 	memset(rd->enc_key, 0, ERASER_KEY_LEN);
@@ -2280,9 +2041,9 @@ static struct target_type eraser_target = {
 /* Module entry. */
 static int __init dm_eraser_init(void)
 {
-	sg_init_one(&sg_in, aes_input, 2*PRG_INPUT_LEN);
-
 	int r;
+
+	sg_init_one(&sg_in, aes_input, 2*PRG_INPUT_LEN);
 	eraser_sock = netlink_kernel_create(&init_net, ERASER_NETLINK, &eraser_netlink_cfg);
 	if (!eraser_sock) {
 		DMERR("Netlink setup failed.");
