@@ -46,13 +46,14 @@
 #define ERASER_PROC_FILE "/proc/erasertab"
 
 #define PRG_INPUT_LEN 16
-#define HOLEPUNCH_PPRF_DEPTH 28
-#define HOLEPUNCH_REFRESH_INTERVAL 50000
+#define HOLEPUNCH_PPRF_DEPTH 18
+#define HOLEPUNCH_REFRESH_INTERVAL 10
 #define HOLEPUNCH_KEY_GROWTH       2*HOLEPUNCH_PPRF_DEPTH
 
 #define ERASER_CREATE 0
 #define ERASER_OPEN 1
 
+#define ERASER_SECTOR 4096   /* In bytes. */
 /* These are just the default values for ext4. Good enough, for now. */
 #define ERASER_BYTES_PER_INODE_RATIO 16384
 
@@ -100,18 +101,23 @@ typedef struct holepunch_header {
 
 	unsigned char pprf_depth;
 	u32 master_key_count; // how many individual keys make up the master key
-	u32 max_master_key_count;
+	u32 master_key_limit;
 	u64 tag;
 
 	char prg_iv[PRG_INPUT_LEN];
 } holepunch_header;
 
 typedef struct holepunch_filekey_entry {
-	u64 tag;
-	unsigned char key[ERASER_KEY_LEN];
-	unsigned char iv[ERASER_IV_LEN];
-	u64 padding;
+	char key[ERASER_KEY_LEN];
+	char iv[ERASER_IV_LEN];
 } holepunch_filekey_entry;
+
+#define HOLEPUNCH_FILEKEYS_PER_SECTOR 4088/sizeof(holepunch_filekey_entry)
+
+typedef struct __attribute__((aligned(4096))) holepunch_filekey_sector  {
+	u64 tag;
+	holepunch_filekey_entry entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
+} holepunch_filekey_sector;
 
 #define MAX_DEPTH 64 
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
@@ -149,6 +155,9 @@ int verify_key(struct eraser_header *);
 void hp_get_keys(int, holepunch_header *);
 int hp_verify_key(holepunch_header *);
 void cleanup_keys();
+
+
+void do_init_filekeys(int, holepunch_header *, u64);
 
 /* Actual commands. */
 int close_eraser(char *);

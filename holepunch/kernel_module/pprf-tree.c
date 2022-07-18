@@ -25,13 +25,14 @@ struct crypto_blkcipher *tfm;
 
 
 void reset_pprf_keynode(pprf_keynode *node) {
-	node->il = 0;
-	node->ir = 0;
-	memset(node->key, 0xcc, PRG_INPUT_LEN);
-#ifdef DEBUG
-	memset(node->lbl.bstr, 0xcc, NODE_LABEL_LEN);
-	node->lbl.depth = 0;
-#endif
+// 	node->il = 0;
+// 	node->ir = 0;
+// 	memset(node->key, 0xcc, PRG_INPUT_LEN);
+// #ifdef DEBUG
+// 	memset(node->lbl.bstr, 0xcc, NODE_LABEL_LEN);
+// 	node->lbl.depth = 0;
+// #endif
+	memset(node, 0, sizeof(pprf_keynode));
 }
 
 
@@ -72,34 +73,41 @@ void set_bit_in_buf(u8* buf, u8 index, bool val) {
 
 // some of these need error returns
 
-int alloc_master_key(pprf_keynode **master_key, u32 *max_master_key_count) {
-	*max_master_key_count = 16000;
-	*master_key = vmalloc(sizeof(pprf_keynode)*(*max_master_key_count));
-    
-	// pprf_depth = MAX_DEPTH;
-	return 0;
+int alloc_master_key(pprf_keynode **master_key, u32 *max_master_key_count, unsigned len) {
+	*max_master_key_count = len / (sizeof(pprf_keynode));
+	if (*master_key) {
+		vfree(*master_key);
+	}
+	*master_key = vmalloc(len);
+
+	return (*master_key != NULL);
 }
 
-#define EXPANSION_FACTOR 4
 
-int expand_master_key(pprf_keynode **master_key, u32 *max_master_key_count) {
-	void *tmp;
+int expand_master_key(pprf_keynode **master_key, u32 *max_master_key_count, unsigned factor) {
+	pprf_keynode *tmp;
 #ifdef DEBUG
-	printk("RESIZING: current size = %u\n", *max_master_key_count);
+	printk("RESIZING: current capacity = %u\n", *max_master_key_count);
 #endif	
-	tmp = vmalloc((*max_master_key_count)*EXPANSION_FACTOR*sizeof(pprf_keynode));
+	tmp = vmalloc((*max_master_key_count)*factor*sizeof(pprf_keynode));
 	if (!tmp)
 		return -ENOMEM;
-	memcpy(tmp, master_key, sizeof(pprf_keynode) * (*max_master_key_count));
-	vfree(master_key);
-	*max_master_key_count *= EXPANSION_FACTOR;
+	memcpy(tmp, *master_key, sizeof(pprf_keynode) * (*max_master_key_count));
+	vfree(*master_key);
+	*max_master_key_count *= factor;
 	*master_key = tmp;
+#ifdef DEBUG
+	printk("RESIZING DONE: final capacity = %u\n", *max_master_key_count);
+#endif	
 
 	return 0;
 }
 
-void init_master_key(pprf_keynode *master_key, u32 *master_key_count) {
-	reset_pprf_keynode(master_key);
+/* we may need to zero out more than just the master key because of things
+ * like page-granularity writes
+ */
+void init_master_key(pprf_keynode *master_key, u32 *master_key_count, unsigned len) {
+	memset(master_key, 0, len);
     ggm_prf_get_random_bytes_kernel(master_key->key, PRG_INPUT_LEN);
 	*master_key_count = 1;
 }
@@ -216,11 +224,7 @@ int puncture(pprf_keynode *master_key, u8* iv, struct crypto_blkcipher *tfm,
 	}
 	// At the end of the loop, the root node is always a punctured node. So set links accordingly
 	root->il = -1;
-	root->ir = -1;
-
-	// // 4. expand array if necessary
-	if (*master_key_count > *max_master_key_count - MAX_DEPTH*2) 
-		expand_master_key(&master_key, master_key_count);
+	root->ir = -1;	
 	
 	return 0;
 }

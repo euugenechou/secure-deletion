@@ -399,33 +399,70 @@ static inline void eraser_get_random_key(u8 *key, struct eraser_dev *rd)
 
 /* Convenience functions for calling pprf functions
  * on a holepunch device */
-static int holepunch_alloc_master_key(struct eraser_dev *rd) {
-	return alloc_master_key(&rd->pprf_master_key, &rd->pprf_master_key_capacity);
+static int holepunch_alloc_master_key(eraser_dev *rd, unsigned len) {
+	return alloc_master_key(&rd->pprf_master_key, &rd->pprf_master_key_capacity, len);
 }
 
-static int holepunch_expand_master_key(struct eraser_dev *rd) {
-	return expand_master_key(&rd->pprf_master_key, &rd->pprf_master_key_capacity);
+static int holepunch_expand_master_key(eraser_dev *rd, unsigned factor) {
+	return expand_master_key(&rd->pprf_master_key, &rd->pprf_master_key_capacity, factor);
 } 
 
-static void holepunch_init_master_key(struct eraser_dev *rd) {
-	return init_master_key(rd->pprf_master_key, &rd->hp_h->master_key_count);
+static void holepunch_init_master_key(eraser_dev *rd, unsigned len) {
+	return init_master_key(rd->pprf_master_key, &rd->hp_h->master_key_count, len);
 }
 
-static int holepunch_evaluate_at_tag(struct eraser_dev *rd, u64 tag, 
+static int holepunch_evaluate_at_tag(eraser_dev *rd, u64 tag, 
 		struct crypto_blkcipher *tfm, u8* out) {
-	return evaluate_at_tag(rd->pprf_master_key, rd->hp_h->prg_iv, tfm, 
+	int r;
+	struct crypto_blkcipher *this_tfm;
+
+	if (!tfm) {
+		this_tfm = rd->tfm[get_cpu()];
+	} else {
+		this_tfm = tfm;
+	}
+
+	r = evaluate_at_tag(rd->pprf_master_key, rd->hp_h->prg_iv, this_tfm, 
 		rd->hp_h->pprf_depth, tag, out);
+	if (!tfm) {
+		put_cpu();
+	}
+
+	return r;
 }
 
-static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag,
+static int holepunch_puncture_at_tag(eraser_dev *rd, u64 tag,
 		struct crypto_blkcipher *tfm) {
-	return puncture_at_tag(rd->pprf_master_key, rd->hp_h->prg_iv, tfm, 
+	int r;
+	struct crypto_blkcipher *this_tfm;
+
+	if (!tfm) {
+		this_tfm = rd->tfm[get_cpu()];
+	} else {
+		this_tfm = tfm;
+	}
+
+	r = puncture_at_tag(rd->pprf_master_key, rd->hp_h->prg_iv, this_tfm, 
 		rd->hp_h->pprf_depth, &rd->hp_h->master_key_count, 
 		&rd->pprf_master_key_capacity, tag);
+	if (!tfm) {
+		put_cpu();
+	}
+
+	// If we are at the key limit, synchronously refresh pprf key
+	if (rd->hp_h->master_key_count + 2*rd->hp_h->pprf_depth > rd->hp_h->master_key_limit) {
+		holepunch_refresh_pprf_key(rd);
+	}
+
+	// Expand the in-memory pprf key buffer if needed.
+	if (rd->hp_h->master_key_count + 2*rd->hp_h->pprf_depth> rd->pprf_master_key_capacity) {
+		holepunch_expand_master_key(rd, HOLEPUNCH_PPRF_EXPANSION_FACTOR);
+	}
+	return r;
 }
 
 #ifdef DEBUG
-static void holepunch_print_master_key(struct eraser_dev *rd) {
+static void holepunch_print_master_key(eraser_dev *rd) {
 	print_master_key(rd->pprf_master_key, &rd->hp_h->master_key_count);
 }
 #endif
@@ -527,36 +564,133 @@ static void eraser_do_crypto_from_page(struct page *p, unsigned offset,
 }
 
 
-static holepunch_filekey_entry *holepunch_read_key_table(struct eraser_dev *rd) {
-	char *data, *map;
-	unsigned sector;
+
+
+// Some holepunch stuff
+
+static inline void holepunch_write_header(eraser_dev *rd) {
+	eraser_rw_sector(0, WRITE, (char *) rd->hp_h, rd);
+}
+
+static inline holepunch_header *holepunch_read_header(eraser_dev *rd) {
+	return (holepunch_header *) eraser_rw_sector(0, READ, NULL, rd);
+}
+
+
+static void holepunch_do_crypto_on_key_table_sector(eraser_dev *rd,
+		 holepunch_filekey_sector *sector, u8 *key, u8 *iv, int op) {
+	struct blkcipher_desc desc;
+	struct scatterlist src, dst;
+	u32 len;
+
+	len = HOLEPUNCH_FILEKEYS_PER_SECTOR * sizeof(holepunch_filekey_entry);
+	
+	sg_init_table(&src, 1);
+	sg_init_table(&dst, 1);
+	sg_set_buf(&src, sector->entries, len);
+	sg_set_buf(&dst, sector->entries, len);
+
+	// this doesnt work for some reason
+	desc.tfm = rd->tfm[get_cpu()];
+	// desc.tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
+	desc.flags = 0;
+	if (key)
+		crypto_blkcipher_setkey(desc.tfm, key, PRG_INPUT_LEN);
+	if (iv)
+		crypto_blkcipher_set_iv(desc.tfm, iv, PRG_INPUT_LEN);
+
+	if (op == ERASER_ENCRYPT) {
+		if (crypto_blkcipher_encrypt(&desc, &dst, &src, len))
+			DMCRIT("Error doing crypto");
+	} else if (op == ERASER_DECRYPT) {
+		if (crypto_blkcipher_decrypt(&desc, &dst, &src, len))
+			DMCRIT("Error doing crypto");
+	} else {
+		DMCRIT("Unknown crypto operation");
+	}
+	// crypto_free_blkcipher(desc.tfm);
+	put_cpu();
+
+}
+
+// PPRF key must be loaded in already!
+
+//should probably rewrite this to read sector by sector
+static holepunch_filekey_sector *holepunch_read_key_table(struct eraser_dev *rd) {
+	char *data;
+	holepunch_filekey_sector *map;
+	unsigned sectorno;
+	u8 pprf_out[PRG_INPUT_LEN];
+	u8 iv_0[PRG_INPUT_LEN];
+
 
 	map = vmalloc(ERASER_SECTOR * rd->hp_h->key_table_len);
 	if (!map)
 		return NULL;
+	memset(iv_0, 0, PRG_INPUT_LEN);
 
-	for (sector = 0; sector < rd->hp_h->key_table_len; ++sector) {
-		data = eraser_rw_sector(sector + rd->hp_h->key_table_start,
+	for (sectorno = 0; sectorno < rd->hp_h->key_table_len; ++sectorno) {
+		data = eraser_rw_sector(sectorno + rd->hp_h->key_table_start,
 			READ, NULL, rd);
-		memcpy(map + (sector *ERASER_SECTOR), data, ERASER_SECTOR);
+		memcpy(map + sectorno, data, ERASER_SECTOR);
 		eraser_free_sector(data, rd);
+
+		holepunch_evaluate_at_tag(rd, (map+sectorno)->tag, NULL, pprf_out);
+// #ifdef DEBUG
+// 		printk(KERN_INFO "READ TABLE: PPRF output for sector %u, tag %llu: %16ph \n", 
+// 			sectorno, (map+sectorno)->tag, pprf_out);
+// #endif
+		holepunch_do_crypto_on_key_table_sector(rd, map+sectorno, pprf_out, iv_0, ERASER_DECRYPT);
 	}
-	return (holepunch_filekey_entry *) map;
+	return map;
 }
 
-static void holepunch_write_key_table_entry(struct eraser_dev *rd, unsigned sectorno) {
+static void holepunch_write_key_table_sector(struct eraser_dev *rd, unsigned sectorno) {
 	struct page *p;
-	char *data;
+	u8 pprf_out[PRG_INPUT_LEN];
+	u8 iv_0[PRG_INPUT_LEN];
+	holepunch_filekey_sector *sector, *data;
 
 	p = eraser_allocate_page(rd);
 	data = kmap(p);
-	memcpy(data, (char*) rd->key_table + sectorno*ERASER_SECTOR, ERASER_SECTOR);
+	sector = rd->key_table + sectorno;
+	memcpy(data, sector, ERASER_SECTOR);
+// #ifdef DEBUG
+// 	printk(KERN_INFO "WRITE TABLE: Evaluating tag %llu for sector %u\n", 
+// 		sector->tag, sectorno);
+// #endif
+	holepunch_evaluate_at_tag(rd, sector->tag, NULL, pprf_out);
+	memset(iv_0, 0, PRG_INPUT_LEN);
+#ifdef DEBUG
+		printk(KERN_INFO "WRITE TABLE: PPRF output for sector %u, tag %llu: %16ph \n", 
+			sectorno, sector->tag, pprf_out);
+#endif
+	holepunch_do_crypto_on_key_table_sector(rd, data, pprf_out, iv_0, ERASER_ENCRYPT);
+
 	eraser_rw_sector(rd->hp_h->key_table_start + sectorno,
 		WRITE, data, rd);
 
 	kunmap(p);
 	eraser_free_page(p, rd);
 }
+
+static int holepunch_set_new_tpm_key(eraser_dev *rd) {
+	eraser_get_random_bytes_kernel(rd->new_master_key, ERASER_KEY_LEN);
+	__set_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status);
+	while (eraser_set_master_key(rd)) {
+		DMCRIT("Holepunch cannot set new TPM key...\n");
+		msleep(100);
+	}
+	while (!test_and_clear_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status)) {
+		DMCRIT("Holepunch waiting for new key to be set.");
+		wait_for_completion_timeout(&rd->master_key_wait, 3 * HZ);
+	}
+	memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
+
+	return 0;
+}
+
+
 
 static pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd) {
 	struct crypto_blkcipher *tfm;
@@ -589,6 +723,7 @@ static pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd) {
 		memcpy(map + (sector *ERASER_SECTOR), data, ERASER_SECTOR);
 		eraser_free_sector(data, rd);
 	}
+	crypto_free_blkcipher(tfm);
 	return (pprf_keynode *) map;
 }
 
@@ -597,26 +732,17 @@ static pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd) {
  * 2. Encrypt the pprf key with the new TPM key and write to disk
  * Crash consistency - this whole thing probably has to be atomic
  */
-static void holepunch_write_pprf_key(struct eraser_dev *rd) {
+static int holepunch_write_pprf_key(eraser_dev *rd) {
 	struct crypto_blkcipher *tfm;
 	char *map;
 	unsigned sector;
 	u8 iv[ERASER_IV_LEN];
 	memset(iv, 0, ERASER_IV_LEN);
+	int r;
 
-	eraser_get_random_bytes_kernel(rd->new_master_key, ERASER_KEY_LEN);
-	__set_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status);
-	while (eraser_set_master_key(rd)) {
-		DMCRIT("Holepunch cannot set new TPM key...\n");
-		msleep(100);
-	}
-	while (!test_and_clear_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status)) {
-		DMCRIT("Waiting for new key to be set.");
-		wait_for_completion_timeout(&rd->master_key_wait, 3 * HZ);
-	}
-	memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
 
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
+	r = holepunch_set_new_tpm_key(rd);	
+
 #ifdef DEBUG
 	printk(KERN_INFO "writing PPRF key: encrypting wih K = %32ph\n", rd->master_key);
 #endif
@@ -624,13 +750,14 @@ static void holepunch_write_pprf_key(struct eraser_dev *rd) {
 	if (!map) {
 		printk("OOM!\n");
 		// This should not fail silently...
-		return;
+		return -1;
 	}
 
+	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
 	for (sector = 0; 
-			sector < DIV_ROUND_UP(rd->hp_h->master_key_count, sizeof(pprf_keynode));
+			sector < DIV_ROUND_UP(rd->hp_h->master_key_count*sizeof(pprf_keynode), ERASER_SECTOR);
 			++sector) {
-		memcpy(map, rd->pprf_master_key + (sector *ERASER_SECTOR), ERASER_SECTOR);
+		memcpy(map, (char *)rd->pprf_master_key + (sector *ERASER_SECTOR), ERASER_SECTOR);
 		if (unlikely(!sector))
 			eraser_do_crypto_from_buffer(map, ERASER_SECTOR, rd->master_key, 
 				iv, tfm, ERASER_ENCRYPT, rd);
@@ -640,9 +767,41 @@ static void holepunch_write_pprf_key(struct eraser_dev *rd) {
 		eraser_rw_sector(sector + rd->hp_h->pprf_key_start,
 			WRITE, map, rd);
 	}
+	crypto_free_blkcipher(tfm);
 	kfree(map);
+
+	return 0;
 }
 
+// TODO: crash?
+static int holepunch_refresh_pprf_key(eraser_dev *rd) {
+	int r;
+	unsigned index;
+	u64 newtag = 0;
+
+#ifdef DEBUG
+	printk(KERN_INFO "\n == REFRESH COMMENCING == \n");
+#endif
+
+	holepunch_alloc_master_key(rd, HOLEPUNCH_INITIAL_PPRF_SIZE);
+	holepunch_init_master_key(rd, ERASER_SECTOR);
+	r = holepunch_write_pprf_key(rd);
+
+	for (index = 0; index < rd->hp_h->key_table_len; ++index) {
+		rd->key_table[index].tag = newtag;
+		holepunch_write_key_table_sector(rd, index);
+		++newtag;
+	}
+
+	rd->hp_h->tag = newtag;
+
+	holepunch_write_header(rd);
+
+#ifdef DEBUG
+	printk(KERN_INFO "\n == REFRESH COMPLETED == \n");
+#endif
+	return 0;
+}
 
 
 
@@ -916,37 +1075,29 @@ static int eraser_evict_map_cache(void *data)
 // 	memcpy(iv, inode_map.iv, ERASER_IV_LEN);
 // }
 
-static void holepunch_get_key_for_inode(unsigned long inode_no, u8 *key, u8 *iv, struct eraser_dev *rd) {
-	u8 buf[ERASER_KEY_LEN + ERASER_IV_LEN];
-	u8 pprf_out[PRG_INPUT_LEN];
-	u8 iv_0[PRG_INPUT_LEN];
-	struct scatterlist src;
-	struct scatterlist dst;
-	struct blkcipher_desc desc;
-
-	struct crypto_blkcipher *tfm = rd->tfm[get_cpu()];
-	desc.tfm = tfm;
-	holepunch_evaluate_at_tag(rd, rd->key_table[inode_no].tag, tfm, pprf_out);
-	memset(iv_0, 0, PRG_INPUT_LEN);
-
+static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, u8 *iv, eraser_dev *rd) {
+	holepunch_filekey_sector *sector;
+	int index;
+	
+	sector = holepunch_get_fkt_sector_for_inode(rd, inode_no);
+	index = holepunch_get_sector_index_for_inode(rd, inode_no);
 #ifdef DEBUG
-	printk(KERN_INFO "PPRF output for ino %lu, tag %llu: %16ph \n", 
-		inode_no, rd->key_table[inode_no].tag, pprf_out);
+	printk(KERN_INFO "Grabbing key and iv from sector %lu index %u\n",
+		inode_no/HOLEPUNCH_FILEKEYS_PER_SECTOR, index);
 #endif
+	memcpy(key, sector->entries[index].key, ERASER_KEY_LEN);
+	memcpy(iv, sector->entries[index].iv, ERASER_IV_LEN);
 
-	sg_init_table(&src, 1);
-	sg_init_table(&dst, 1);
+}
 
-	sg_set_buf(&src, rd->key_table[inode_no].key, ERASER_KEY_LEN + ERASER_IV_LEN);
-	sg_set_buf(&dst, buf, ERASER_KEY_LEN + ERASER_IV_LEN);
-	crypto_blkcipher_setkey(desc.tfm, pprf_out, PRG_INPUT_LEN);
-	crypto_blkcipher_set_iv(desc.tfm, iv_0, PRG_INPUT_LEN);
-	if (crypto_blkcipher_decrypt(&desc, &dst, &src, ERASER_KEY_LEN + ERASER_IV_LEN))
-		DMCRIT("Error doing crypto");
-	put_cpu();
-	memcpy(key, buf, ERASER_KEY_LEN);
-	memcpy(iv, buf+ERASER_KEY_LEN, ERASER_IV_LEN);
+static inline holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode 
+		(eraser_dev *rd, u64 ino) {
+	return rd->key_table + (ino / HOLEPUNCH_FILEKEYS_PER_SECTOR);
+}
 
+static inline int holepunch_get_sector_index_for_inode 
+		(eraser_dev *rd, u64 ino) {
+	return ino % HOLEPUNCH_FILEKEYS_PER_SECTOR;
 }
 
 /*
@@ -1133,50 +1284,57 @@ static inline void eraser_refresh_map_entry(struct eraser_map_entry *m, struct e
 /* Bottom half for unlink operations. */
 static void holepunch_do_unlink(struct work_struct *work) {
 	struct eraser_unlink_work *w = container_of(work, struct eraser_unlink_work, work);
-	struct crypto_blkcipher *tfm;
-	u64 tag, sectorno;
+	u64 sectorno, index, old_tag;
+	holepunch_filekey_sector *sector;
 
-	tag = w->rd->key_table[w->inode_no].tag;	
-	tfm = w->rd->tfm[get_cpu()];
-	holepunch_puncture_at_tag(w->rd, tag, tfm);
-#ifdef DEBUG
-	printk(KERN_INFO "UNLINK: puncture at tag %llu\n", tag);
-	holepunch_print_master_key(w->rd);
-#endif
+	sectorno = w->inode_no / HOLEPUNCH_FILEKEYS_PER_SECTOR;
+	sector = holepunch_get_fkt_sector_for_inode(w->rd, w->inode_no);
+	index = holepunch_get_sector_index_for_inode(w->rd, w->inode_no);
+
 
 	/* rerolling the slot */
-#ifdef DEBUG
-	printk(KERN_INFO "Old file key entry\n\t\t tag: %llu\n"
-					 "\t\t(Encrypted) key : %32ph\n"
-					 "\t\t(Encrypted) iv : %16ph\n",
-					 w->rd->key_table[w->inode_no].tag, w->rd->key_table[w->inode_no].key,
-					 w->rd->key_table[w->inode_no].iv);
-#endif
-	eraser_get_random_bytes_kernel(w->rd->key_table[w->inode_no].key, ERASER_KEY_LEN);
-	eraser_get_random_bytes_kernel(w->rd->key_table[w->inode_no].iv, ERASER_IV_LEN);
-	w->rd->key_table[w->inode_no].tag = w->rd->hp_h->tag;
+// #ifdef DEBUG
+// 	printk(KERN_INFO "Old file key entry\t\t tag: %llu\t\t"
+// 					 "\t\t(plaintext) key : %32ph\n"
+// 					 "\t\t(plaintext) iv : %16ph\n",
+// 					 ,sector->tag, sector->entries[index].key,
+// 					 sector->entries[index].iv);
+// #endif
+	eraser_get_random_bytes_kernel(sector->entries[index].key, ERASER_KEY_LEN);
+	eraser_get_random_bytes_kernel(sector->entries[index].iv, ERASER_IV_LEN);
+	old_tag = sector->tag;
+	sector->tag = w->rd->hp_h->tag;
 	++w->rd->hp_h->tag;
 #ifdef DEBUG
-	printk(KERN_INFO "New file key entry\n\t\t tag: %llu\n"
-					 "\t\t(Encrypted) key : %32ph\n"
-					 "\t\t(Encrypted) iv : %16ph\n",
-					 w->rd->key_table[w->inode_no].tag, w->rd->key_table[w->inode_no].key,
-					 w->rd->key_table[w->inode_no].iv);
+	printk(KERN_INFO "Old file key entry\t\t tag: %llu\t\t"
+					 "New file key entry\t\t tag: %llu\n", old_tag, sector->tag);
+					//  "\t\t(plaintext) key : %32ph\n"
+					//  "\t\t(plaintext) iv : %16ph\n",
+					//  ,sector->tag, sector->entries[index].key,
+					//  sector->entries[index].iv);
 #endif
 
+	holepunch_puncture_at_tag(w->rd, old_tag, NULL);
+#ifdef DEBUG
+	printk(KERN_INFO "Keylength: %lu/%lu, limit:%lu\n", w->rd->hp_h->master_key_count, 
+		w->rd->pprf_master_key_capacity, w->rd->hp_h->master_key_limit);
+	// printk(KERN_INFO "UNLINK: puncture at tag %llu\n", old_tag);
+	// holepunch_print_master_key(w->rd);
+#endif
 	/* Persists new crypto information to disk
 	 * Currently sync
 	 */
-	eraser_rw_sector(0, WRITE, w->rd->hp_h, w->rd);
-	sectorno = w->inode_no/sizeof(holepunch_filekey_entry);
-	holepunch_write_key_table_entry(w->rd, sectorno);
+	holepunch_write_header(w->rd);
+	holepunch_write_key_table_sector(w->rd, sectorno);
 	holepunch_write_pprf_key(w->rd);
 	eraser_free_unlink_work(w);
 }
 
 static void eraser_do_unlink(struct work_struct *work)
 {
-	printk(KERN_INFO "HOLEPUNCH UNLINK");
+#ifdef DEBUG
+	printk(KERN_INFO "HOLEPUNCH UNLINK\n");
+#endif
 	holepunch_do_unlink(work);
 	// struct eraser_unlink_work *w = container_of(work, struct eraser_unlink_work, work);
 	// struct eraser_map_cache *c;
@@ -1668,7 +1826,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	/* Read header from disk. */
-	rd->hp_h = (holepunch_header*) eraser_read_header(rd);
+	rd->hp_h = holepunch_read_header(rd);
 	if (!rd->hp_h) {
 		ti->error = "Could not read header.";
 		goto read_header_fail;
@@ -1681,7 +1839,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	printk(KERN_INFO "PPRF key start: %llu\n", rd->hp_h->pprf_key_start);
 	printk(KERN_INFO "PPRF key sectors: %llu\n", rd->hp_h->pprf_key_len);
-	printk(KERN_INFO "PPRF key length: %u/%u\n", rd->hp_h->master_key_count, rd->hp_h->max_master_key_count);
+	printk(KERN_INFO "PPRF key length: %u/%u\n", rd->hp_h->master_key_count, rd->hp_h->master_key_limit);
 
 	printk(KERN_INFO "Data start: %llu\n", rd->hp_h->data_start);
 	printk(KERN_INFO "Data sectors: %llu\n", rd->hp_h->data_len);
@@ -1807,25 +1965,17 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	// 	goto read_slot_map_fail;
 	// }
 
-	rd->key_table = holepunch_read_key_table(rd);
-	if (!rd->key_table) {
-		ti->error = "Could not read key table.";
-		goto read_slot_map_fail;
-	}
-#ifdef DEBUG
-	printk(KERN_INFO "%32ph\n%16ph\n", (rd->key_table)[0].key, (rd->key_table)[0].iv);
-#endif
 	if (unlikely(rd->hp_h->master_key_count == 0)) {
 #ifdef DEBUG
 		printk(KERN_INFO "Fresh holepunch: generating root pprf key\n");
 #endif 
 		// rd->pprf_master_key = vmalloc(16000*sizeof(pprf_keynode));
-		holepunch_alloc_master_key(rd);
+		holepunch_alloc_master_key(rd, HOLEPUNCH_INITIAL_PPRF_SIZE);
 		if (!rd->pprf_master_key) {
 			ti->error = "Could not read pprf key.";
 			goto read_slot_map_fail;
 		}
-		holepunch_init_master_key(rd);
+		holepunch_init_master_key(rd, ERASER_SECTOR);
 		holepunch_write_pprf_key(rd);
 	} else {
 #ifdef DEBUG
@@ -1839,6 +1989,18 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 #ifdef DEBUG
 	holepunch_print_master_key(rd);
+#endif
+
+	rd->key_table = holepunch_read_key_table(rd);
+	if (!rd->key_table) {
+		ti->error = "Could not read key table.";
+		goto read_slot_map_fail;
+	}
+#ifdef DEBUG
+	printk(KERN_INFO "tag: %llu\nkey: %32ph\niv: %16ph\n", 
+		(rd->key_table)[0].tag,
+		(rd->key_table)[0].entries[0].key, 
+		(rd->key_table)[0].entries[0].iv);
 #endif
 
 
@@ -1973,7 +2135,7 @@ static void eraser_dtr(struct dm_target *ti)
 	memset(rd->enc_key, 0, ERASER_KEY_LEN);
 
 	/* Write header. */
-	eraser_rw_sector(0, WRITE, (char *) rd->hp_h, rd);
+	holepunch_write_header(rd);
 	eraser_free_sector(rd->hp_h, rd);
 	// eraser_write_header(rd->rh, rd);
 	// eraser_free_sector(rd->rh, rd);

@@ -156,6 +156,41 @@ void cleanup_keys() {
     }
 }
 
+
+void do_init_filekeys(int fd, holepunch_header *hp_h, u64 inode_count) {
+    holepunch_filekey_sector *filekey_table;
+    holepunch_filekey_entry *entries;
+    unsigned sec_num, sectors;
+    u32 ino_num;
+
+    sectors = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
+    filekey_table = malloc(ERASER_SECTOR * sectors);
+    
+    for (sec_num = 0; sec_num < sectors; ++sec_num) {
+        filekey_table[sec_num].tag = sec_num;
+        entries = filekey_table[sec_num].entries;
+        for (ino_num = 0; ino_num < HOLEPUNCH_FILEKEYS_PER_SECTOR; ++ino_num) {
+#ifdef ERASER_DEBUG
+            memset(entries[ino_num].key, 0xbc, ERASER_KEY_LEN);
+            memset(entries[ino_num].iv, 0xde, ERASER_IV_LEN);
+#else
+            get_random_data(entries[ino_num].key, ERASER_KEY_LEN);
+            get_random_data(entries[ino_num].iv, ERASER_IV_LEN);
+#endif
+        }
+    }
+    write_sectors(fd,  (char *) filekey_table, hp_h->key_table_len);
+    free(filekey_table);
+
+    #ifdef ERASER_DEBUG
+    print_green("%u inodes initialized\n", inode_count);
+#endif
+}
+
+
+
+
+
 /*
  * Actual commands.
  */
@@ -421,10 +456,10 @@ void do_create(char *dev_path, int nv_index) {
     u64 dev_size;
     u64 inode_count;
     int fd;
-    char *buf;
-    unsigned max;
-    unsigned cur;
-    unsigned count;
+    // char *buf;
+    // unsigned max;
+    // unsigned cur;
+    // unsigned count;
 
     /* Open device. */
     if ((fd = open(dev_path, O_RDWR)) == -1) {
@@ -448,7 +483,7 @@ void do_create(char *dev_path, int nv_index) {
     /* Compute sizes for holepunch metadata */
 
     /* The key table should have inode_num number of entries */
-    char *hp_buf;
+    // char *hp_buf;
     holepunch_header *hp_h;
 
     // hp_buf = malloc(ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
@@ -456,14 +491,15 @@ void do_create(char *dev_path, int nv_index) {
     hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
 
     hp_h->master_key_count = 0;
-    hp_h->max_master_key_count = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
-    hp_h->tag = inode_count+1;
+    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
     hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
 
-    hp_h->key_table_len = div_ceil(inode_count * sizeof(holepunch_filekey_entry), ERASER_SECTOR_LEN);
-    hp_h->pprf_key_len = div_ceil(hp_h->max_master_key_count * sizeof(pprf_keynode), ERASER_SECTOR_LEN);
+    hp_h->key_table_len = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
+    hp_h->pprf_key_len = div_ceil(hp_h->master_key_limit * sizeof(pprf_keynode), ERASER_SECTOR_LEN);
     hp_h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN - hp_h->key_table_len - hp_h->pprf_key_len;
     hp_h->len = hp_h->data_len + hp_h->pprf_key_len + hp_h->key_table_len;
+
+    hp_h->tag = hp_h->key_table_len;
 
     hp_h->key_table_start = ERASER_HEADER_LEN;
     hp_h->pprf_key_start = hp_h->key_table_start + hp_h->key_table_len;
@@ -471,7 +507,7 @@ void do_create(char *dev_path, int nv_index) {
 #ifdef ERASER_DEBUG
     memset(hp_h->prg_iv, 0x88, PRG_INPUT_LEN);
 #else
-    get_random_bytes(hp_h->prg_iv, PRG_INPUT_LEN);
+    get_random_data(hp_h->prg_iv, PRG_INPUT_LEN);
 #endif
 
 #ifdef ERASER_DEBUG
@@ -480,7 +516,7 @@ void do_create(char *dev_path, int nv_index) {
 
     print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
     print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
-    print_green("PPRF key max elts: %llu\n", hp_h->max_master_key_count);
+    print_green("PPRF key max elts: %llu\n", hp_h->master_key_limit);
 
     print_green("Data start: %llu\n", hp_h->data_start);
     print_green("Data sectors: %llu\n", hp_h->data_len);
@@ -502,34 +538,16 @@ void do_create(char *dev_path, int nv_index) {
     memset(master_key, 0, ERASER_KEY_LEN);
 
     /* Write the header. */
-    write_sectors(fd, hp_h, ERASER_HEADER_LEN);
+    write_sectors(fd, (char *) hp_h, ERASER_HEADER_LEN);
+    do_init_filekeys(fd, hp_h, inode_count);
     
-    hp_buf = malloc(sizeof(holepunch_filekey_entry) * inode_count);
     
-    u32 ino_num;
-    holepunch_filekey_entry *filekey_table;
-    
-    filekey_table = (holepunch_filekey_entry *) hp_buf;
-    for (ino_num = 0; ino_num < inode_count; ++ino_num) {
-        filekey_table[ino_num].tag = ino_num;
-#ifdef ERASER_DEBUG
-        memset(filekey_table[ino_num].key, 0xbc, ERASER_KEY_LEN);
-        memset(filekey_table[ino_num].iv, 0xde, ERASER_IV_LEN);
-#else
-        get_random_data(filekey_table[ino_num].key, ERASER_KEY_LEN);
-        get_random_data(filekey_table[ino_num].iv, ERASER_IV_LEN);
-#endif
-    }
-    
-#ifdef ERASER_DEBUG
-    print_green("fd at sector %u pos %u keytablelen=%u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, 
-                lseek(fd, 0, SEEK_CUR), hp_h->key_table_len);
-#endif
-    write_sectors(fd, hp_buf, hp_h->key_table_len);
+// #ifdef ERASER_DEBUG
+//     print_green("fd at sector %u pos %u keytablelen=%u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, 
+//                 lseek(fd, 0, SEEK_CUR), hp_h->key_table_len);
+// #endif
 
-#ifdef ERASER_DEBUG
-    print_green("%u inodes initialized\n", ino_num);
-#endif
+
 
 //     memset (hp_buf, 0, ERASER_SECTOR_LEN);
 //     pprf_keynode *pprf_root = (pprf_keynode *) hp_buf;
@@ -569,7 +587,7 @@ void do_create(char *dev_path, int nv_index) {
     sync();
     print_green("\nDone!\n\n");
 
-    free(hp_buf);
+    // free(hp_buf);
     free(hp_h);
 tpm_error:
     cleanup_nvram(nvram);
