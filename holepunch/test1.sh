@@ -12,6 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
+numfiles=500
 
 for ((i=0; i<500; i++))
 do
@@ -20,11 +21,8 @@ do
     echo "$contents" > "$fname"
 done
 
-cd ..
-umount home
-
-mount /dev/mapper/holepunch /mnt/home
-cd /mnt/home
+sync
+echo "1" > /proc/sys/vm/drop_caches
 ls
 
 for ((i=0; i<498; i++))
@@ -32,7 +30,10 @@ do
     sleep 0.05
     printf -v fname "hello%03d" "$i"
     printf "Deleting $fname...\n"
+    j=i+1
     rm "$fname"
+    printf -v fname "hello%03d" "$((i + 1))"
+    cat "$fname"
 done
 
 # cd ..

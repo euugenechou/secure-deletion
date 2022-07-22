@@ -32,6 +32,11 @@
 
 #include "pprf-tree.h"
 
+
+
+
+
+
 #define DM_MSG_PREFIX "eraser"
 
 #define ERASER_SECTOR 4096   /* In bytes. */
@@ -72,29 +77,48 @@
 #define ERASER_PROC_FILE "erasertab"
 
 
-typedef struct holepunch_filekey_entry {
-	// u64 tag;
+struct holepunch_filekey_entry {
 	u8 key[ERASER_KEY_LEN];
 	u8 iv[ERASER_IV_LEN];
-	// u64 padding;
-} holepunch_filekey_entry;
+};
 
-#define HOLEPUNCH_FILEKEYS_PER_SECTOR (4088/sizeof(holepunch_filekey_entry))
+#define HOLEPUNCH_FILEKEYS_PER_SECTOR \
+		((ERASER_SECTOR-8)/sizeof(struct holepunch_filekey_entry))
 
-typedef struct __attribute__((aligned(4096))) holepunch_filekey_sector {
+struct __attribute__((aligned(ERASER_SECTOR))) holepunch_filekey_sector {
 	u64 tag;
-	holepunch_filekey_entry entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
-} holepunch_filekey_sector;
+	struct holepunch_filekey_entry entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
+};
+
+
+struct holepunch_pprf_fkt_entry {
+	u8 key[ERASER_KEY_LEN];
+	u8 iv[ERASER_IV_LEN];
+};
+
+#define HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR \
+		(ERASER_SECTOR/sizeof(struct pprf_keynode))
+#define HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR \
+		(ERASER_SECTOR/sizeof(struct holepunch_pprf_fkt_entry))
+
+struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_keynode_sector {
+	struct pprf_keynode entries[HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR];
+};
+
+struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
+	struct holepunch_pprf_fkt_entry entries[HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR];
+};
+
 
 
 /* ERASER header. Must match the definition in the user space. */
-typedef struct holepunch_header {
+struct holepunch_header {
 	// not sure what to do with all theses
 	u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
 	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
 	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
+	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for PPRF FKT encryption. */
 
 	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
 		       * kernel side. */
@@ -103,6 +127,8 @@ typedef struct holepunch_header {
 	u64 len;
 	u64 key_table_start;
 	u64 key_table_len;
+	u64 pprf_fkt_start;
+	u64 pprf_fkt_len;
 	u64 pprf_key_start;
 	u64 pprf_key_len;
 	u64 data_start;
@@ -113,8 +139,11 @@ typedef struct holepunch_header {
 	u32 master_key_limit;
 	u64 tag;
 
+	u32 pprf_fkt_top_width;
+	u32 pprf_fkt_bottom_width;
+
 	u8 prg_iv[PRG_INPUT_LEN];
-} holepunch_header;
+};
 
 
 /*
@@ -170,7 +199,7 @@ enum {
 };
 
 /* Represents a ERASER instance. */
-typedef struct eraser_dev {
+struct eraser_dev {
 	char eraser_name[ERASER_NAME_LEN + 1]; /* Instance name. */
 	struct dm_dev *real_dev;           /* Underlying block device. */
 	dev_t virt_dev;                    /* Virtual device-mapper node. */
@@ -185,14 +214,14 @@ typedef struct eraser_dev {
 	int helper_pid;                    /* Netlink talks to this pid. */
 
 	struct eraser_header *rh;            /* Header, basic metadata. */
-	holepunch_header *hp_h;
+	struct holepunch_header *hp_h;
 
-	pprf_keynode* pprf_master_key;
+	struct holepunch_pprf_keynode_sector *pprf_master_key;
 	u32 pprf_master_key_capacity;
-	
+	struct holepunch_pprf_fkt_sector *pprf_fkt;
 
 	struct eraser_map_entry *slot_map;   /* In-memory slot map. */
-	holepunch_filekey_sector *key_table;
+	struct holepunch_filekey_sector *key_table;
 	struct list_head map_cache_list[ERASER_MAP_CACHE_BUCKETS];
 	u64 map_cache_count;
 	struct task_struct *evict_map_cache_thread;
@@ -221,7 +250,7 @@ typedef struct eraser_dev {
 	struct semaphore cache_lock[ERASER_MAP_CACHE_BUCKETS];
 
 	struct list_head list;
-} eraser_dev;
+};
 static LIST_HEAD(eraser_dev_list); /* We keep all ERASERs in a list. */
 static DEFINE_SEMAPHORE(eraser_dev_lock);
 
@@ -265,50 +294,81 @@ struct eraser_unlink_work {
         struct work_struct work;
 };
 
-static int eraser_set_master_key(eraser_dev *rd);
+static int eraser_set_master_key(struct eraser_dev *rd);
 
-static inline void holepunch_write_header(eraser_dev *rd);
-static inline holepunch_header *holepunch_read_header(eraser_dev *rd);
+static inline void holepunch_write_header(struct eraser_dev *rd);
+static inline struct holepunch_header *holepunch_read_header(struct eraser_dev *rd);
 
 
 #define HOLEPUNCH_PPRF_EXPANSION_FACTOR 4
-#define HOLEPUNCH_INITIAL_PPRF_SIZE (1*ERASER_SECTOR)
+// in sectors
+#define HOLEPUNCH_INITIAL_PPRF_SIZE 1 
 
-static int holepunch_alloc_master_key(eraser_dev *rd, unsigned len);
-static int holepunch_expand_master_key(eraser_dev *rd, unsigned factor);
-static void holepunch_init_master_key(eraser_dev *rd, unsigned len);
-static int holepunch_evaluate_at_tag(eraser_dev *rd, u64 tag, 
+static int holepunch_alloc_master_key(struct eraser_dev *rd, unsigned len);
+static int holepunch_expand_master_key(struct eraser_dev *rd, unsigned factor);
+static void holepunch_init_master_key(struct eraser_dev *rd);
+struct pprf_keynode *holepunch_get_keynode_by_index(void* ptr, unsigned index);
+static int holepunch_evaluate_at_tag(struct eraser_dev *rd, u64 tag, 
 		struct crypto_blkcipher *tfm, u8* out);
-static int holepunch_puncture_at_tag(eraser_dev *rd, u64 tag,
+static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag,
 		struct crypto_blkcipher *tfm);
 
+static inline struct holepunch_pprf_fkt_entry *holepunch_get_parent_entry_for_fkt_bottom_layer
+		(struct eraser_dev *rd, unsigned index);
+static inline unsigned holepunch_get_parent_sectorno_for_fkt_bottom_layer
+		(struct eraser_dev *rd, unsigned index);
+static int holepunch_alloc_pprf_fkt(struct eraser_dev *rd);
+static void holepunch_init_pprf_fkt(struct eraser_dev *rd);
+
+static void holepunch_write_pprf_fkt_bottom_sector(struct eraser_dev *rd,
+		unsigned sector, struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
+static void holepunch_write_pprf_fkt_top_sector(struct eraser_dev *rd, 
+		unsigned sector, struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
+static int holepunch_write_pprf_fkt(struct eraser_dev *rd);
+
+static void holepunch_read_pprf_fkt(struct eraser_dev *rd);
+
 #ifdef DEBUG
-static void holepunch_print_master_key(eraser_dev *rd);
+static void holepunch_print_master_key(struct eraser_dev *rd);
 #endif
 
 
-static inline holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode (eraser_dev *rd, u64 ino);
-static inline int holepunch_get_sector_index_for_inode (eraser_dev *rd, u64 ino);
+static inline struct holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode (struct eraser_dev *rd, u64 ino);
+static inline int holepunch_get_sector_index_for_inode (struct eraser_dev *rd, u64 ino);
 
 
-static void holepunch_do_crypto_on_key_table_sector(eraser_dev *rd,
-		 holepunch_filekey_sector *sector, u8 *key, u8 *iv, int op);
-static holepunch_filekey_sector *holepunch_read_key_table(eraser_dev *rd);
+static void holepunch_do_crypto_on_key_table_sector(struct eraser_dev *rd,
+		 struct holepunch_filekey_sector *sector, u8 *key, u8 *iv, int op);
+static struct holepunch_filekey_sector *holepunch_read_key_table(struct eraser_dev *rd);
 static void holepunch_write_key_table_sector(struct eraser_dev *rd, unsigned sectorno);
 
-static int holepunch_set_new_tpm_key(eraser_dev *rd);
+static int holepunch_set_new_tpm_key(struct eraser_dev *rd);
 
-static pprf_keynode *holepunch_read_pprf_key(eraser_dev *rd);
-static int holepunch_write_pprf_key(eraser_dev *rd);
-static int holepunch_refresh_pprf_key(eraser_dev *rd);
+static inline struct holepunch_pprf_fkt_entry *holepunch_get_pprf_fkt_entry_for_keynode_sector
+	(struct eraser_dev *rd, unsigned index);
+static inline unsigned holepunch_get_pprf_fkt_sectorno_for_keynode_sector
+		(struct eraser_dev *rd, unsigned index);
+static inline int holepunch_get_pprf_keynode_sector_for_keynode_index(struct eraser_dev *rd,
+		int pprf_keynode_index);
+static struct holepunch_pprf_keynode_sector *holepunch_read_pprf_key(struct eraser_dev *rd);
+static int holepunch_write_pprf_key(struct eraser_dev *rd);
+static int holepunch_write_pprf_key_sector(struct eraser_dev *rd, unsigned index, 
+	struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
+static int holepunch_refresh_pprf_key(struct eraser_dev *rd);
 
 
-static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, u8 *iv, eraser_dev *rd);
+static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, u8 *iv, struct eraser_dev *rd);
 
-static inline holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode 
-		(eraser_dev *rd, u64 ino);
+static inline struct holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode 
+		(struct eraser_dev *rd, u64 ino);
 static inline int holepunch_get_sector_index_for_inode 
-		(eraser_dev *rd, u64 ino);
+		(struct eraser_dev *rd, u64 ino);
 
 static void holepunch_do_unlink(struct work_struct *work);
+
+
+
+MODULE_AUTHOR("Wittmann Goh");
+MODULE_DESCRIPTION("holepunch target - based off of ERASER");
+MODULE_LICENSE("GPL");
 #endif

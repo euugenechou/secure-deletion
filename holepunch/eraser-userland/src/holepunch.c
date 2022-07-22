@@ -140,11 +140,11 @@ int verify_key(struct eraser_header *h) {
 
 
 /* THIS ONLY WORKS IF WE KEEP THE FIRST 5 ENTRIES IDENTICAL TO ERASER */
-void hp_get_keys(int op, holepunch_header *h) {
+void hp_get_keys(int op, struct holepunch_header *h) {
     get_keys(op, (struct eraser_header*) h);
 }
 
-int hp_verify_key(holepunch_header *h) {
+int hp_verify_key(struct holepunch_header *h) {
     return verify_key((struct eraser_header*)h);
 }
 
@@ -157,9 +157,9 @@ void cleanup_keys() {
 }
 
 
-void do_init_filekeys(int fd, holepunch_header *hp_h, u64 inode_count) {
-    holepunch_filekey_sector *filekey_table;
-    holepunch_filekey_entry *entries;
+void do_init_filekeys(int fd, struct holepunch_header *hp_h, u64 inode_count) {
+    struct holepunch_filekey_sector *filekey_table;
+    struct holepunch_filekey_entry *entries;
     unsigned sec_num, sectors;
     u32 ino_num;
 
@@ -416,8 +416,12 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
         print_green("Key table start: %llu\n", hp_h->key_table_start);
         print_green("Key table sectors: %llu\n", hp_h->key_table_len);
 
+        print_green("PPRF fkt start: %llu\n", hp_h->pprf_fkt_start);
+        print_green("PPRF fkt sectors: %llu\n", hp_h->pprf_fkt_len);
+
         print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
         print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
+        print_green("PPRF key max elts: %llu\n", hp_h->master_key_limit);
 
         print_green("Data start: %llu\n", hp_h->data_start);
         print_green("Data sectors: %llu\n", hp_h->data_len);
@@ -484,7 +488,7 @@ void do_create(char *dev_path, int nv_index) {
 
     /* The key table should have inode_num number of entries */
     // char *hp_buf;
-    holepunch_header *hp_h;
+    struct holepunch_header *hp_h;
 
     // hp_buf = malloc(ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
     // memset(hp_buf, 0, ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
@@ -495,14 +499,20 @@ void do_create(char *dev_path, int nv_index) {
     hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
 
     hp_h->key_table_len = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
-    hp_h->pprf_key_len = div_ceil(hp_h->master_key_limit * sizeof(pprf_keynode), ERASER_SECTOR_LEN);
-    hp_h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN - hp_h->key_table_len - hp_h->pprf_key_len;
-    hp_h->len = hp_h->data_len + hp_h->pprf_key_len + hp_h->key_table_len;
+
+    hp_h->pprf_key_len = div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
+    hp_h->pprf_fkt_bottom_width = div_ceil(hp_h->pprf_key_len, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
+    hp_h->pprf_fkt_top_width = div_ceil(hp_h->pprf_fkt_bottom_width, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
+    hp_h->pprf_fkt_len = hp_h->pprf_fkt_bottom_width + hp_h->pprf_fkt_top_width;
+    hp_h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN 
+        - hp_h->key_table_len - hp_h->pprf_key_len -hp_h->pprf_fkt_len;
+    hp_h->len = hp_h->data_len + hp_h->pprf_key_len + hp_h->key_table_len + hp_h->pprf_fkt_len;
 
     hp_h->tag = hp_h->key_table_len;
 
     hp_h->key_table_start = ERASER_HEADER_LEN;
-    hp_h->pprf_key_start = hp_h->key_table_start + hp_h->key_table_len;
+    hp_h->pprf_fkt_start = hp_h->key_table_start + hp_h->key_table_len;
+    hp_h->pprf_key_start = hp_h->pprf_fkt_start + hp_h->pprf_fkt_len;
     hp_h->data_start = hp_h->pprf_key_start + hp_h->pprf_key_len;
 #ifdef ERASER_DEBUG
     memset(hp_h->prg_iv, 0x88, PRG_INPUT_LEN);
@@ -513,6 +523,9 @@ void do_create(char *dev_path, int nv_index) {
 #ifdef ERASER_DEBUG
     print_green("Key table start: %llu\n", hp_h->key_table_start);
     print_green("Key table sectors: %llu\n", hp_h->key_table_len);
+
+    print_green("PPRF fkt start: %llu\n", hp_h->pprf_fkt_start);
+    print_green("PPRF fkt sectors: %llu\n", hp_h->pprf_fkt_len);
 
     print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
     print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
@@ -541,47 +554,7 @@ void do_create(char *dev_path, int nv_index) {
     write_sectors(fd, (char *) hp_h, ERASER_HEADER_LEN);
     do_init_filekeys(fd, hp_h, inode_count);
     
-    
-// #ifdef ERASER_DEBUG
-//     print_green("fd at sector %u pos %u keytablelen=%u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, 
-//                 lseek(fd, 0, SEEK_CUR), hp_h->key_table_len);
-// #endif
-
-
-
-//     memset (hp_buf, 0, ERASER_SECTOR_LEN);
-//     pprf_keynode *pprf_root = (pprf_keynode *) hp_buf;
-//     pprf_root->il = 0;
-//     pprf_root->ir = 0;
-//     // get_random_data(pprf_root->key, PRG_INPUT_LEN);
-// #ifdef ERASER_DEBUG
-// 	memset(pprf_root->lbl.bstr, 0xcc, NODE_LABEL_LEN);
-// 	pprf_root->lbl.depth = 0;
-//     int i;
-//     print_green("PPRF key: ");
-//     for (i=0; i< PRG_INPUT_LEN; ++i) {
-//         print_green(" %02x", pprf_root->key[i]);
-//     }
-//     // print_green("fd at sector %u pos %u\n", lseek(fd, 0, SEEK_CUR)/ERASER_SECTOR_LEN, lseek(fd, 0, SEEK_CUR));
-// #endif
-//     write_sectors(fd, hp_buf, 1);
-
-
-    // print_red("NOT IMPLEMENTED\n");
-    // return;
-
-// #define RANDOM_FILL_SECTORS 1000
-//     /* Write random map entries. */
-//     buf = realloc(buf, RANDOM_FILL_SECTORS * ERASER_SECTOR_LEN);
-//     max = h->slot_map_len + h->inode_map_len;
-//     cur = 0;
-
-//     while(cur < max) {
-//         count = ((max - cur) > RANDOM_FILL_SECTORS) ? RANDOM_FILL_SECTORS : (max - cur);
-//         get_random_data(buf, count * ERASER_SECTOR_LEN);
-//         write_sectors(fd, buf, count);
-//         cur += count;
-//     }
+    // We defer initializing the PPRF and PPRF fkt to the kernel module
 
     /* All done. */
     sync();

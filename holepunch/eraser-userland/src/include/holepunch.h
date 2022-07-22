@@ -57,6 +57,24 @@
 /* These are just the default values for ext4. Good enough, for now. */
 #define ERASER_BYTES_PER_INODE_RATIO 16384
 
+
+#define MAX_DEPTH 64 
+#define NODE_LABEL_LEN (MAX_DEPTH+7)/8
+struct node_label {
+	unsigned char bstr[NODE_LABEL_LEN];
+	unsigned char depth;
+};
+
+#define PRG_INPUT_LEN 16
+struct pprf_keynode {
+	u32 il;
+	u32 ir;
+	unsigned char key[PRG_INPUT_LEN];
+#ifdef ERASER_DEBUG
+	struct node_label lbl;
+#endif
+};
+
 /* Must match the kernel side definition. */
 struct eraser_header {
     char enc_key[ERASER_KEY_LEN];           /* Encrypted disk sector encryption key. */
@@ -79,7 +97,7 @@ struct eraser_header {
 
 
 /* ERASER header. Must match the definition in the user space. */
-typedef struct holepunch_header {
+struct holepunch_header {
 	// not sure what to do with all theses
 	char enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
 	char enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
@@ -94,18 +112,23 @@ typedef struct holepunch_header {
 	u64 len;
 	u64 key_table_start;
 	u64 key_table_len;
+	u64 pprf_fkt_start;
+	u64 pprf_fkt_len;
 	u64 pprf_key_start;
 	u64 pprf_key_len;
 	u64 data_start;
 	u64 data_len;
 
-	unsigned char pprf_depth;
+	char pprf_depth;
 	u32 master_key_count; // how many individual keys make up the master key
 	u32 master_key_limit;
 	u64 tag;
 
+	u32 pprf_fkt_top_width;
+	u32 pprf_fkt_bottom_width;
+
 	char prg_iv[PRG_INPUT_LEN];
-} holepunch_header;
+};
 
 typedef struct holepunch_filekey_entry {
 	char key[ERASER_KEY_LEN];
@@ -119,22 +142,26 @@ typedef struct __attribute__((aligned(4096))) holepunch_filekey_sector  {
 	holepunch_filekey_entry entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
 } holepunch_filekey_sector;
 
-#define MAX_DEPTH 64 
-#define NODE_LABEL_LEN (MAX_DEPTH+7)/8
-typedef struct node_label {
-	unsigned char bstr[NODE_LABEL_LEN];
-	unsigned char depth;
-} node_label;
+struct holepunch_pprf_fkt_entry {
+	char key[ERASER_KEY_LEN];
+	char iv[ERASER_IV_LEN];
+};
 
-#define PRG_INPUT_LEN 16
-typedef struct pprf_keynode {
-	u32 il;
-	u32 ir;
-	unsigned char key[PRG_INPUT_LEN];
-#ifdef ERASER_DEBUG
-	node_label lbl;
-#endif
-} pprf_keynode;
+#define HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR \
+		(ERASER_SECTOR/sizeof(struct pprf_keynode))
+#define HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR \
+		(ERASER_SECTOR/sizeof(struct holepunch_pprf_fkt_entry))
+
+struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_keynode_sector {
+	struct pprf_keynode entries[HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR];
+};
+
+struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
+	struct holepunch_pprf_fkt_entry entries[HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR];
+};
+
+
+
 
 
 /* size padded to 64 bytes, must be multiple of sector size */
@@ -152,12 +179,12 @@ void handle_signal(int);
 /* Key derivation and management. */
 void get_keys(int, struct eraser_header *);
 int verify_key(struct eraser_header *);
-void hp_get_keys(int, holepunch_header *);
-int hp_verify_key(holepunch_header *);
+void hp_get_keys(int, struct holepunch_header *);
+int hp_verify_key(struct holepunch_header *);
 void cleanup_keys();
 
 
-void do_init_filekeys(int, holepunch_header *, u64);
+void do_init_filekeys(int, struct holepunch_header *, u64);
 
 /* Actual commands. */
 int close_eraser(char *);
