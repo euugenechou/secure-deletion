@@ -499,32 +499,26 @@ static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag,
 	int r;
 	struct crypto_blkcipher *this_tfm;
 
-	if (!tfm)
-	{
+	if (!tfm) {
 		this_tfm = rd->tfm[get_cpu()];
-	}
-	else
-	{
+	} else {
 		this_tfm = tfm;
 	}
 
 	r = puncture_at_tag(&holepunch_get_keynode_by_index, rd->pprf_master_key, rd->hp_h->prg_iv, this_tfm,
-						rd->hp_h->pprf_depth, &rd->hp_h->master_key_count,
-						&rd->pprf_master_key_capacity, tag);
-	if (!tfm)
-	{
+		rd->hp_h->pprf_depth, &rd->hp_h->master_key_count,
+		&rd->pprf_master_key_capacity, tag);
+	if (!tfm) {
 		put_cpu();
 	}
 
 	// If we are at the key limit, synchronously refresh pprf key
-	if (rd->hp_h->master_key_count + 2 * rd->hp_h->pprf_depth > rd->hp_h->master_key_limit)
-	{
+	if (rd->hp_h->master_key_count + 2 * rd->hp_h->pprf_depth > rd->hp_h->master_key_limit) {
 		holepunch_refresh_pprf_key(rd);
 	}
 
 	// Expand the in-memory pprf key buffer if needed.
-	if (rd->hp_h->master_key_count + 2 * rd->hp_h->pprf_depth > rd->pprf_master_key_capacity)
-	{
+	if (rd->hp_h->master_key_count + 2 * rd->hp_h->pprf_depth > rd->pprf_master_key_capacity) {
 		holepunch_expand_master_key(rd, HOLEPUNCH_PPRF_EXPANSION_FACTOR);
 	}
 	return r;
@@ -534,7 +528,7 @@ static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag,
 static void holepunch_print_master_key(struct eraser_dev *rd)
 {
 	print_master_key(&holepunch_get_keynode_by_index,
-					 rd->pprf_master_key, &rd->hp_h->master_key_count);
+		rd->pprf_master_key, &rd->hp_h->master_key_count);
 }
 #endif
 
@@ -544,8 +538,8 @@ static void holepunch_print_master_key(struct eraser_dev *rd)
 
 /* Convert one buffer of data. */
 static void __eraser_do_crypto(struct scatterlist *src, struct scatterlist *dst, u64 len,
-							   u8 *key, u8 *iv, struct crypto_blkcipher *tfm,
-							   int op, struct eraser_dev *rd)
+		u8 *key, u8 *iv, struct crypto_blkcipher *tfm,
+		int op, struct eraser_dev *rd)
 {
 	struct blkcipher_desc desc;
 
@@ -1063,88 +1057,6 @@ static int holepunch_refresh_pprf_key(struct eraser_dev *rd)
 	return 0;
 }
 
-/*
- * Map (i.e., key tree) and cache functions.
- */
-/*
- * Reads sectors of slot entries. Used only for the slot map. For inode maps we
- * have a better optimized one exploiting the fact that they are always single
- * sector reads.
- */
-// static struct eraser_map_entry *eraser_read_slot_map(u64 start, u64 len, u8 *key, u8 *iv, struct eraser_dev *rd)
-// {
-// 	struct crypto_blkcipher *tfm;
-// 	char *data;
-// 	char *map;
-// 	u64 i;
-
-// 	/* Use a fresh tfm so that nothing breaks if this code gets scheduled on
-// 	 * different CPUs. */
-// 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
-
-// 	/* Could be big. */
-// 	map = vmalloc(len * ERASER_SECTOR);
-
-// 	/* Do crypto in chunks. Crypto API cannot work on vmalloc'd regions! */
-// 	data = eraser_rw_sector(start, READ, NULL, rd);
-// 	eraser_do_crypto_from_buffer(data, ERASER_SECTOR, key, iv, tfm, ERASER_DECRYPT, rd);
-// 	memcpy(map, data, ERASER_SECTOR);
-// 	eraser_free_sector(data, rd);
-
-// 	for (i = 1; i < len; ++i) {
-// 		data = eraser_rw_sector(start + i, READ, NULL, rd);
-// 		eraser_do_crypto_from_buffer(data, ERASER_SECTOR, NULL, NULL, tfm, ERASER_DECRYPT, rd);
-// 		memcpy(map + (i * ERASER_SECTOR), data, ERASER_SECTOR);
-// 		eraser_free_sector(data, rd);
-// }
-
-// 	crypto_free_blkcipher(tfm);
-
-// 	return (struct eraser_map_entry *) map;
-// }
-
-/* Writes the slot map back to disk. */
-// static void eraser_write_slot_map(struct eraser_map_entry *slot_map, u64 start, u64 len,
-// 				u8 *key, u8 *iv, struct eraser_dev *rd)
-// {
-// 	struct crypto_blkcipher *tfm;
-// 	struct page *p;
-// 	char *map = (char *) slot_map;
-// 	char *data;
-// 	u64 i;
-
-// 	/* Use a fresh tfm so that nothing breaks if this code gets scheduled on
-// 	 * different CPUs. */
-// 	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
-// 	p = eraser_allocate_page(rd);
-// 	data = kmap(p);
-
-// 	/* Do crypto in chunks. Crypto API cannot work on vmalloc'd regions! */
-// 	memcpy(data, map, ERASER_SECTOR);
-// 	eraser_do_crypto_from_buffer(data, ERASER_SECTOR, key, iv, tfm, ERASER_ENCRYPT, rd);
-// 	eraser_rw_sector(start, WRITE, data, rd);
-
-// 	for (i = 1; i < len; ++i) {
-// 		memcpy(data, map + (i * ERASER_SECTOR), ERASER_SECTOR);
-// 		eraser_do_crypto_from_buffer(data, ERASER_SECTOR, NULL, NULL, tfm, ERASER_ENCRYPT, rd);
-// 		eraser_rw_sector(start + i, WRITE, data, rd);
-// 	}
-
-// 	kunmap(p);
-// 	eraser_free_page(p, rd);
-
-// 	crypto_free_blkcipher(tfm);
-// }
-
-// static inline u64 eraser_get_inode_offset(unsigned long inode_no)
-// {
-// 	return inode_no % ERASER_MAP_PER_SECTOR;
-// }
-
-// static inline u64 eraser_get_slot_no(unsigned long inode_no)
-// {
-// 	return inode_no / ERASER_MAP_PER_SECTOR;
-// }
 
 /* Drop a cache entry. Lock from outside. */
 static inline void eraser_drop_map_cache(struct eraser_map_cache *c, struct eraser_dev *rd)
@@ -1265,77 +1177,6 @@ static int eraser_evict_map_cache(void *data)
 	return 0; /* Never. */
 }
 
-/* Search the cache for given keys. Lock from outside. */
-// static struct eraser_map_cache *eraser_search_map_cache(u64 slot_no, int bucket, struct eraser_dev *rd)
-// {
-// 	struct eraser_map_cache *c;
-
-// 	list_for_each_entry(c, &rd->map_cache_list[bucket], list) {
-// 		if (c->slot_no == slot_no) {
-// 			c->last_access = jiffies;
-// 			return c;
-// 		}
-// 	}
-
-// 	return NULL; /* Not found. */
-// }
-
-/* Read from disk the given keys, and cache. Lock from outside. */
-// static struct eraser_map_cache *eraser_cache_map(u64 slot_no, int bucket, struct eraser_dev *rd)
-// {
-// 	struct eraser_map_cache *c;
-
-// 	/* Read map entries from disk. */
-// 	c = eraser_allocate_map_cache(rd);
-// 	c->map = eraser_rw_sector(rd->rh->inode_map_start + slot_no, READ, NULL, rd);
-// 	eraser_do_crypto_from_buffer((char *)c->map, ERASER_SECTOR,
-// 				rd->slot_map[slot_no].key, rd->slot_map[slot_no].iv,
-// 				NULL, ERASER_DECRYPT, rd);
-
-// 	/* Set up the rest of the cache entry. */
-// 	c->slot_no = slot_no;
-// 	c->status = 0;
-// 	c->first_access = jiffies;
-// 	c->last_access = jiffies;
-
-// 	/* Add to cache. */
-// 	INIT_LIST_HEAD(&c->list);
-// 	list_add(&c->list, &rd->map_cache_list[bucket]);
-// 	rd->map_cache_count += 1;
-
-// 	return c;
-// }
-
-/* Retrieve the inode metadata from disk or cache. */
-// static void eraser_get_inode_map_entry(unsigned long inode_no, struct eraser_dev *rd, struct eraser_map_entry *out)
-// {
-// 	struct eraser_map_cache *c;
-// 	u64 slot_no;
-// 	int bucket;
-
-// 	slot_no = eraser_get_slot_no(inode_no);
-// 	bucket = slot_no % ERASER_MAP_CACHE_BUCKETS;
-
-// 	down(&rd->cache_lock[bucket]);
-// 	c = eraser_search_map_cache(slot_no, bucket, rd);
-// 	if (!c) {
-// 		c = eraser_cache_map(slot_no, bucket, rd);
-// 	}
-
-// 	/* Return a copy of the inode map entry. */
-// 	memcpy(out, &c->map[eraser_get_inode_offset(inode_no)], sizeof(*out));
-// 	up(&rd->cache_lock[bucket]);
-// }
-
-/* Get the inode key and iv. */
-// static void eraser_get_key_for_inode(unsigned long inode_no, u8 *key, u8 *iv, struct eraser_dev *rd)
-// {
-// 	struct eraser_map_entry inode_map;
-
-// 	eraser_get_inode_map_entry(inode_no, rd, &inode_map);
-// 	memcpy(key, inode_map.key, ERASER_KEY_LEN);
-// 	memcpy(iv, inode_map.iv, ERASER_IV_LEN);
-// }
 
 static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, u8 *iv, struct eraser_dev *rd)
 {
@@ -1590,14 +1431,14 @@ static void holepunch_do_unlink(struct work_struct *work)
 #endif
 	new_keynode_start_index = w->rd->hp_h->master_key_count;
 	punctured_keynode_index = holepunch_puncture_at_tag(w->rd, old_tag, NULL);
-	new_keynode_end_index = w->rd->hp_h->master_key_count - 1;
+	new_keynode_end_index = w->rd->hp_h->master_key_count;
 
 	punctured_keynode_sector =
 		holepunch_get_pprf_keynode_sector_for_keynode_index(w->rd, punctured_keynode_index);
 	new_keynode_start_sector =
 		holepunch_get_pprf_keynode_sector_for_keynode_index(w->rd, new_keynode_start_index);
 	new_keynode_end_sector =
-		holepunch_get_pprf_keynode_sector_for_keynode_index(w->rd, new_keynode_end_index);
+		holepunch_get_pprf_keynode_sector_for_keynode_index(w->rd, new_keynode_end_index-1);
 
 #ifdef DEBUG
 	printk(KERN_INFO "Keylength: %u/%u, limit:%u\n", w->rd->hp_h->master_key_count,
@@ -1606,8 +1447,8 @@ static void holepunch_do_unlink(struct work_struct *work)
 		punctured_keynode_index, new_keynode_start_index, new_keynode_end_index);
 	printk(KERN_INFO "PPRF keynode sectors touched: %lu %lu %lu\n",
 		   punctured_keynode_sector, new_keynode_start_sector, new_keynode_end_sector);
+	holepunch_print_master_key(w->rd);
 	// printk(KERN_INFO "UNLINK: puncture at tag %llu\n", old_tag);
-	// holepunch_print_master_key(w->rd);
 #endif
 	// Persists new crypto information to disk
 	DMCRIT("!");
@@ -1624,7 +1465,7 @@ static void holepunch_do_unlink(struct work_struct *work)
 	if (new_keynode_start_sector != punctured_keynode_sector) {
 		holepunch_write_pprf_key_sector(w->rd, new_keynode_start_sector, tfm, map, false);
 	}
-	if (new_keynode_end_sector != new_keynode_start_sector)	{
+	if (new_keynode_end_sector > new_keynode_start_sector)	{
 		holepunch_write_pprf_key_sector(w->rd, new_keynode_end_sector, tfm, map, false);
 	}
 

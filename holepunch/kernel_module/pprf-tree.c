@@ -140,12 +140,15 @@ struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsign
 	*depth = 0;
 	do {
 		cur = node_getter(pprf_base, i);
+		if (likely(index)) {
+			*index = i;
+		}
 		if(check_bit_is_set(lbl->bstr, *depth)) 
 			i = cur->ir;
 		else
 			i = cur->il;
 		if (i == 0) 
-			goto out;
+			return cur;
 		// else if (i == (u32)-1)
 		// 	return NULL;
 		++*depth;
@@ -153,10 +156,6 @@ struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsign
 
 	cur = node_getter(pprf_base, i);
 	if (cur->il == 0) {
-out:
-		if (index) {
-			*index = i;
-		}
 		return cur;
 	}
 	return NULL;
@@ -179,7 +178,6 @@ int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	int root_index;
 	struct pprf_keynode *root;
 	
-	// root_index = 0;
 	root = find_key(node_getter, pprf_base, pprf_depth, lbl, &depth, &root_index);
 	
 	// it will be NULL if its already been punctured, in which case we just return
@@ -334,19 +332,19 @@ void print_master_key(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	u32 i;
 	struct pprf_keynode *node;
 	char node_label_str[8*NODE_LABEL_LEN+1];
-
+	
 	printk(KERN_INFO ": Master key dump START, len=%u:\n", *master_key_count);
 	i=0;
 	for (; i<*master_key_count; ++i) {
 		node = node_getter(pprf_base, i);
-		label_to_string(&(node->lbl), node_label_str, 8*NODE_LABEL_LEN+1);
-		printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%16ph, label:%s\n",
-			i, node->il, node->ir, node->key, node_label_str);
-		// printk(KERN_INFO "n:%u, ", i);
-		// printk(KERN_CONT "il:%u, ", master_key[i].il);
-		// printk(KERN_CONT "ir:%u, ", master_key[i].ir);
-		// printk(KERN_CONT "key:%16ph, ", master_key[i].key);
-		// printk(KERN_CONT "label:%s\n", node_label_str);
+		label_to_string(&node->lbl, node_label_str, 8*NODE_LABEL_LEN+1);
+		// trace_printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%16ph, label:%s\n",
+		// 	i, node->il, node->ir, node->key, node_label_str);
+		printk(KERN_INFO "n:%u, ", i);
+		printk(KERN_CONT "il:%u, ", node->il);
+		printk(KERN_CONT "ir:%u, ", node->ir);
+		printk(KERN_CONT "key:%16ph, ", node->key);
+		printk(KERN_CONT "label:%s\n", node_label_str);
 	}
 
 	printk(KERN_INFO ": END Master key dump\n");

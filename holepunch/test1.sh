@@ -12,9 +12,9 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=500
+numfiles=50
 
-for ((i=0; i<500; i++))
+for ((i=0; i<$numfiles; i++))
 do
     printf -v fname "hello%03d" "$i"
     printf -v contents "hello from %03d" "$i"
@@ -25,7 +25,7 @@ sync
 echo "1" > /proc/sys/vm/drop_caches
 ls
 
-for ((i=0; i<498; i++))
+for ((i=0; i<$numfiles-2; i++))
 do
     sleep 0.05
     printf -v fname "hello%03d" "$i"
@@ -44,10 +44,12 @@ done
 # mount /dev/mapper/holepunch /mnt/home
 # cd /mnt/home
 
-sleep 0.1
+sleep 1
 ls
-cat "hello498"
-cat "hello499"
+printf -v fname "hello%03d" "$((numfiles - 2))"
+cat "$fname"
+printf -v fname "hello%03d" "$((numfiles - 1))"
+cat "$fname"
 # cat hi
 # cat bar
 # cat baz
