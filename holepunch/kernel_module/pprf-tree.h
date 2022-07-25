@@ -50,7 +50,7 @@ struct pprf_keynode {
 	u32 il;
 	u32 ir;
 	u8 key[PRG_INPUT_LEN];
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 	struct node_label lbl;
 #endif
 };
@@ -93,7 +93,7 @@ int evaluate_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned),
 
 
 
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
 void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label *lbl);
 void print_master_key(struct pprf_keynode *(*node_getter) (void*, unsigned), 

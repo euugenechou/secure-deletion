@@ -76,6 +76,34 @@
 /* /proc file listing mapped ERASER devices. */
 #define ERASER_PROC_FILE "erasertab"
 
+#define KWORKERMSG(msg, arg...) \
+	do { \
+		printk(KERN_INFO "[%u/%u] " msg, task_pid_nr(current), get_cpu(), ## arg); \
+		put_cpu(); \
+	} while (0)
+
+
+#if defined(HOLEPUNCH_DEBUG) && defined(HOLEPUNCH_SEMA)
+	#define HP_DOWN_WRITE(sem, msg, arg...) \
+		do { \
+			KWORKERMSG("acquring write sem: " msg "\n", ## arg); \
+			down_write(sem);\
+			KWORKERMSG("write sem acquired: " msg "\n", ## arg); \
+		} while (0)
+#else
+	#define HP_DOWN_WRITE(sem, msg, arg...) down_write(sem)
+#endif
+
+#if defined(HOLEPUNCH_DEBUG) && defined(HOLEPUNCH_SEMA)
+	#define HP_UP_WRITE(sem, msg, arg...) \
+		do { \
+			up_write(sem);\
+			KWORKERMSG("write sem relinquished: " msg "\n", ## arg); \
+		} while (0)
+#else
+	#define HP_UP_WRITE(sem, msg, arg...) up_write(sem)
+#endif
+
 
 struct holepunch_filekey_entry {
 	u8 key[ERASER_KEY_LEN];
@@ -113,7 +141,6 @@ struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
 
 /* ERASER header. Must match the definition in the user space. */
 struct holepunch_header {
-	// not sure what to do with all theses
 	u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
 	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
 	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
@@ -134,13 +161,16 @@ struct holepunch_header {
 	u64 data_start;
 	u64 data_len;
 
+	u32 pprf_fkt_top_width;
+	u32 pprf_fkt_bottom_width;
+
 	u8 pprf_depth;
+
+	/* The fields below are mutable */
 	u32 master_key_count; // how many individual keys make up the master key
 	u32 master_key_limit;
 	u64 tag;
 
-	u32 pprf_fkt_top_width;
-	u32 pprf_fkt_bottom_width;
 
 	u8 prg_iv[PRG_INPUT_LEN];
 };
@@ -215,14 +245,18 @@ struct eraser_dev {
 
 	struct eraser_header *rh;            /* Header, basic metadata. */
 	struct holepunch_header *hp_h;
+	struct rw_semaphore header_sem;
 
 	struct holepunch_pprf_keynode_sector *pprf_master_key;
 	u32 pprf_master_key_capacity;
 	struct holepunch_pprf_fkt_sector *pprf_fkt;
+	struct rw_semaphore pprf_sem;
 
-	struct eraser_map_entry *slot_map;   /* In-memory slot map. */
 	struct holepunch_filekey_sector *key_table;
+	struct rw_semaphore *filekey_sem_array;
+	
 	struct list_head map_cache_list[ERASER_MAP_CACHE_BUCKETS];
+	struct eraser_map_entry *slot_map;   /* In-memory slot map. */
 	u64 map_cache_count;
 	struct task_struct *evict_map_cache_thread;
 
@@ -311,29 +345,32 @@ struct pprf_keynode *holepunch_get_keynode_by_index(void* ptr, unsigned index);
 static int holepunch_evaluate_at_tag(struct eraser_dev *rd, u64 tag, 
 		struct crypto_blkcipher *tfm, u8* out);
 static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag,
-		struct crypto_blkcipher *tfm);
+		struct crypto_blkcipher *tfm, u32 *punct, u32 *start, u32 *end);
 
 static inline struct holepunch_pprf_fkt_entry *holepunch_get_parent_entry_for_fkt_bottom_layer
 		(struct eraser_dev *rd, unsigned index);
 static inline unsigned holepunch_get_parent_sectorno_for_fkt_bottom_layer
 		(struct eraser_dev *rd, unsigned index);
+static inline unsigned holepunch_get_parent_index_for_fkt_bottom_layer
+		(struct eraser_dev *rd, unsigned index);
 static int holepunch_alloc_pprf_fkt(struct eraser_dev *rd);
 static void holepunch_init_pprf_fkt(struct eraser_dev *rd);
-
+static int holepunch_refresh_pprf_fkt(struct eraser_dev *rd, 
+		unsigned bot_sect_start, unsigned bot_sect_end);
 static void holepunch_write_pprf_fkt_bottom_sector(struct eraser_dev *rd,
 		unsigned sector, struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
 static void holepunch_write_pprf_fkt_top_sector(struct eraser_dev *rd, 
 		unsigned sector, struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
 static int holepunch_write_pprf_fkt(struct eraser_dev *rd);
-
 static void holepunch_read_pprf_fkt(struct eraser_dev *rd);
 
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 static void holepunch_print_master_key(struct eraser_dev *rd);
 #endif
 
 
-static inline struct holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode (struct eraser_dev *rd, u64 ino);
+static inline struct holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode 
+		(struct eraser_dev *rd, u64 ino);
 static inline int holepunch_get_sector_index_for_inode (struct eraser_dev *rd, u64 ino);
 
 

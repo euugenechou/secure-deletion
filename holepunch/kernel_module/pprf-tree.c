@@ -72,7 +72,7 @@ int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count
 
 int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned factor) {
 	struct pprf_keynode *tmp;
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 	printk("RESIZING: current capacity = %u\n", *max_master_key_count);
 #endif	
 	tmp = vmalloc((*max_master_key_count)*factor*sizeof(struct pprf_keynode));
@@ -82,7 +82,7 @@ int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_coun
 	vfree(*master_key);
 	*max_master_key_count *= factor;
 	*master_key = tmp;
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 	printk("RESIZING DONE: final capacity = %u\n", *max_master_key_count);
 #endif	
 
@@ -181,8 +181,10 @@ int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	root = find_key(node_getter, pprf_base, pprf_depth, lbl, &depth, &root_index);
 	
 	// it will be NULL if its already been punctured, in which case we just return
-	if (!root)
+	if (!root) {
+		// printk(KERN_INFO "Should not be reached\n");
 		return -1;
+	}
 
 	// now we traverse
 	// 2. find all neighbors in path
@@ -203,7 +205,7 @@ int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned),
 			root->ir = *master_key_count;
 			root->il = *master_key_count+1;
 		}
-	#ifdef DEBUG
+	#ifdef HOLEPUNCH_DEBUG
 		memcpy(&(node_getter(pprf_base, *master_key_count)->lbl), lbl, sizeof(struct node_label));
 		set_bit_in_buf(node_getter(pprf_base, *master_key_count)->lbl.bstr, depth, !set);
 		node_getter(pprf_base, *master_key_count)->lbl.depth = depth+1;
@@ -250,7 +252,7 @@ int evaluate(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	bool set;
 	struct pprf_keynode *root; 
 	
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 	memset(out, 0xcc, PRG_INPUT_LEN);
 #endif
 
@@ -285,7 +287,7 @@ int evaluate_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned),
 
 
 
-#ifdef DEBUG
+#ifdef HOLEPUNCH_DEBUG
 // printing functions
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 	u64 bit;
@@ -307,7 +309,7 @@ void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 }
 
 // prints the key that evaluates this label (or none if punctured)
-// void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label*lbl) {
+// void print_pkeynode_HOLEPUNCH_DEBUG(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label*lbl) {
 //     // terrible terrible stringy stuff
 // 	int depth;
 //     char node_label_str[8*NODE_LABEL_LEN+21];

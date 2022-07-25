@@ -12,7 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=50
+numfiles=500
 
 for ((i=0; i<$numfiles; i++))
 do
@@ -27,13 +27,13 @@ ls
 
 for ((i=0; i<$numfiles-2; i++))
 do
-    sleep 0.05
+    # sleep 1
     printf -v fname "hello%03d" "$i"
     printf "Deleting $fname...\n"
     j=i+1
     rm "$fname"
-    printf -v fname "hello%03d" "$((i + 1))"
-    cat "$fname"
+    # printf -v fname "hello%03d" "$((i + 1))"
+    # cat "$fname"
 done
 
 # cd ..
