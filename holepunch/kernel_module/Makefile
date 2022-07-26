@@ -3,7 +3,7 @@ dm-holepunch-y := dm-holepunch-main.o pprf-tree.o
 
 
 all:
-	make -C ~/Desktop/linux M=$(PWD) modules ccflags-y=$(ccflags-y)
+	make -C ~/Desktop/linux M=$(PWD) modules ccflags-y="$(ccflags-y)"
 
 debug: ccflags-y += -DHOLEPUNCH_DEBUG
 debug: all

@@ -69,26 +69,22 @@ int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf);
 bool check_bit_is_set(u8* buf, u8 index);
 void set_bit_in_buf(u8* buf, u8 index, bool val);
 
-// int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned len);
-// int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned factor);
-// void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, unsigned len);
+int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned len);
+int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned factor);
+void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, unsigned len);
 
 void init_node_label_from_bitstring(struct node_label *lbl, const char* bitstring);
 void init_node_label_from_long(struct node_label *lbl, u8 pprf_depth, u64 val);
 
-struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8 pprf_depth, struct node_label *lbl, u32 *depth, int *index);
-int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, u8 pprf_depth, u32 *master_key_count, 
-		u32 *max_master_key_count, struct node_label *lbl);
-int puncture_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, u8 pprf_depth, u32 *master_key_count, 
-		u32 *max_master_key_count, u64 tag);
-int evaluate(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth, 
+		struct node_label *lbl, u32 *depth, int *index);
+int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, struct node_label *lbl);
+int puncture_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag);
+int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, struct node_label *lbl, u8 *out);
-int evaluate_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u64 tag, u8* out);
 
 
@@ -96,8 +92,7 @@ int evaluate_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned),
 #ifdef HOLEPUNCH_DEBUG
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
 void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label *lbl);
-void print_master_key(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u32 *master_key_count);
+void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count);
 #endif
 
 

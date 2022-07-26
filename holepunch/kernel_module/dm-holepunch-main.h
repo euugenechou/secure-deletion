@@ -83,7 +83,7 @@
 	} while (0)
 
 
-#if defined(HOLEPUNCH_DEBUG) && defined(HOLEPUNCH_SEMA)
+#ifdef HOLEPUNCH_SEMA
 	#define HP_DOWN_WRITE(sem, msg, arg...) \
 		do { \
 			KWORKERMSG("acquring write sem: " msg "\n", ## arg); \
@@ -94,7 +94,7 @@
 	#define HP_DOWN_WRITE(sem, msg, arg...) down_write(sem)
 #endif
 
-#if defined(HOLEPUNCH_DEBUG) && defined(HOLEPUNCH_SEMA)
+#ifdef HOLEPUNCH_SEMA
 	#define HP_UP_WRITE(sem, msg, arg...) \
 		do { \
 			up_write(sem);\
@@ -247,7 +247,7 @@ struct eraser_dev {
 	struct holepunch_header *hp_h;
 	struct rw_semaphore header_sem;
 
-	struct holepunch_pprf_keynode_sector *pprf_master_key;
+	struct pprf_keynode *pprf_master_key;
 	u32 pprf_master_key_capacity;
 	struct holepunch_pprf_fkt_sector *pprf_fkt;
 	struct rw_semaphore pprf_sem;
@@ -335,8 +335,7 @@ static inline struct holepunch_header *holepunch_read_header(struct eraser_dev *
 
 
 #define HOLEPUNCH_PPRF_EXPANSION_FACTOR 4
-// in sectors
-#define HOLEPUNCH_INITIAL_PPRF_SIZE 1 
+#define HOLEPUNCH_INITIAL_PPRF_SIZE ERASER_SECTOR
 
 static int holepunch_alloc_master_key(struct eraser_dev *rd, unsigned len);
 static int holepunch_expand_master_key(struct eraser_dev *rd, unsigned factor);
@@ -364,6 +363,20 @@ static void holepunch_write_pprf_fkt_top_sector(struct eraser_dev *rd,
 static int holepunch_write_pprf_fkt(struct eraser_dev *rd);
 static void holepunch_read_pprf_fkt(struct eraser_dev *rd);
 
+static int holepunch_set_new_tpm_key(struct eraser_dev *rd);
+
+static inline struct holepunch_pprf_fkt_entry *holepunch_get_pprf_fkt_entry_for_keynode_sector
+	(struct eraser_dev *rd, unsigned index);
+static inline unsigned holepunch_get_pprf_fkt_sectorno_for_keynode_sector
+		(struct eraser_dev *rd, unsigned index);
+static inline int holepunch_get_pprf_keynode_sector_for_keynode_index(struct eraser_dev *rd,
+		int pprf_keynode_index);
+static struct pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd);
+static int holepunch_write_pprf_key(struct eraser_dev *rd);
+static int holepunch_write_pprf_key_sector(struct eraser_dev *rd, unsigned index, 
+	struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
+static int holepunch_refresh_pprf_key(struct eraser_dev *rd);
+
 #ifdef HOLEPUNCH_DEBUG
 static void holepunch_print_master_key(struct eraser_dev *rd);
 #endif
@@ -379,19 +392,6 @@ static void holepunch_do_crypto_on_key_table_sector(struct eraser_dev *rd,
 static struct holepunch_filekey_sector *holepunch_read_key_table(struct eraser_dev *rd);
 static void holepunch_write_key_table_sector(struct eraser_dev *rd, unsigned sectorno);
 
-static int holepunch_set_new_tpm_key(struct eraser_dev *rd);
-
-static inline struct holepunch_pprf_fkt_entry *holepunch_get_pprf_fkt_entry_for_keynode_sector
-	(struct eraser_dev *rd, unsigned index);
-static inline unsigned holepunch_get_pprf_fkt_sectorno_for_keynode_sector
-		(struct eraser_dev *rd, unsigned index);
-static inline int holepunch_get_pprf_keynode_sector_for_keynode_index(struct eraser_dev *rd,
-		int pprf_keynode_index);
-static struct holepunch_pprf_keynode_sector *holepunch_read_pprf_key(struct eraser_dev *rd);
-static int holepunch_write_pprf_key(struct eraser_dev *rd);
-static int holepunch_write_pprf_key_sector(struct eraser_dev *rd, unsigned index, 
-	struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
-static int holepunch_refresh_pprf_key(struct eraser_dev *rd);
 
 
 static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, u8 *iv, struct eraser_dev *rd);

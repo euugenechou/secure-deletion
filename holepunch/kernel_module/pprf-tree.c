@@ -130,8 +130,7 @@ void init_node_label_from_long(struct node_label *lbl, u8 pprf_depth, u64 val) {
  * Additionally will write the node index to "index" if not NULL
  * Will initialize depth to 0
  */ 
-struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8 pprf_depth, 
+struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth, 
 		struct node_label *lbl, u32 *depth, int *index) {
 	unsigned i;
 	struct pprf_keynode *cur;
@@ -139,7 +138,7 @@ struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsign
 	i = 0;
 	*depth = 0;
 	do {
-		cur = node_getter(pprf_base, i);
+		cur = pprf_base + i;
 		if (likely(index)) {
 			*index = i;
 		}
@@ -154,7 +153,7 @@ struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsign
 		++*depth;
 	} while (*depth < pprf_depth);
 
-	cur = node_getter(pprf_base, i);
+	cur = pprf_base + i;
 	if (cur->il == 0) {
 		return cur;
 	}
@@ -168,8 +167,7 @@ struct pprf_keynode *find_key(struct pprf_keynode *(*node_getter) (void*, unsign
  * Otherwise returns the index of the PPRF keynode that was changed
  * as a result of the puncture (used for writeback purposes).
  */
-int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, struct node_label*lbl) {
 	u32 depth;
 	u8 keycpy[PRG_INPUT_LEN];
@@ -178,7 +176,7 @@ int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	int root_index;
 	struct pprf_keynode *root;
 	
-	root = find_key(node_getter, pprf_base, pprf_depth, lbl, &depth, &root_index);
+	root = find_key(pprf_base, pprf_depth, lbl, &depth, &root_index);
 	
 	// it will be NULL if its already been punctured, in which case we just return
 	if (!root) {
@@ -196,29 +194,29 @@ int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned),
 		set = check_bit_is_set(lbl->bstr, depth);
 		if (set) {
 			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
-			memcpy(node_getter(pprf_base, *master_key_count)->key, tmp, PRG_INPUT_LEN);
+			memcpy((pprf_base + *master_key_count)->key, tmp, PRG_INPUT_LEN);
 			root->il = *master_key_count;
 			root->ir = *master_key_count+1;
 		} else {
 			memcpy(keycpy, tmp, PRG_INPUT_LEN);
-			memcpy(node_getter(pprf_base, *master_key_count)->key, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
+			memcpy((pprf_base + *master_key_count)->key, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
 			root->ir = *master_key_count;
 			root->il = *master_key_count+1;
 		}
 	#ifdef HOLEPUNCH_DEBUG
-		memcpy(&(node_getter(pprf_base, *master_key_count)->lbl), lbl, sizeof(struct node_label));
-		set_bit_in_buf(node_getter(pprf_base, *master_key_count)->lbl.bstr, depth, !set);
-		node_getter(pprf_base, *master_key_count)->lbl.depth = depth+1;
+		memcpy(&(pprf_base+*master_key_count)->lbl, lbl, sizeof(struct node_label));
+		set_bit_in_buf((pprf_base+*master_key_count)->lbl.bstr, depth, !set);
+		(pprf_base + *master_key_count)->lbl.depth = depth+1;
 
-		memcpy(&(node_getter(pprf_base, *master_key_count+1)->lbl), lbl, sizeof(struct node_label));
-		set_bit_in_buf(node_getter(pprf_base, *master_key_count+1)->lbl.bstr, depth, set);
-		node_getter(pprf_base, *master_key_count+1)->lbl.depth = depth+1;
+		memcpy(&(pprf_base+*master_key_count)->lbl, lbl, sizeof(struct node_label));
+		set_bit_in_buf((pprf_base + *master_key_count+1)->lbl.bstr, depth, set);
+		(pprf_base + *master_key_count+1)->lbl.depth = depth+1;
 	#endif
-		node_getter(pprf_base, *master_key_count)->il = 0;
-		node_getter(pprf_base, *master_key_count)->ir = 0;
+		(pprf_base + *master_key_count)->il = 0;
+		(pprf_base + *master_key_count)->ir = 0;
 		*master_key_count += 2;
 		++depth;
-		root = node_getter(pprf_base, *master_key_count-1);
+		root = (pprf_base + *master_key_count-1);
 	}
 	// At the end of the loop, the root node is always a punctured node. So set links accordingly
 	root->il = -1;
@@ -227,13 +225,12 @@ int puncture(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	return root_index;
 }
 
-int puncture_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+int puncture_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag) {
 	struct node_label lbl;
 	init_node_label_from_long(&lbl, pprf_depth, tag);
 
-	return puncture(node_getter, pprf_base, iv, tfm, pprf_depth,
+	return puncture(pprf_base, iv, tfm, pprf_depth,
 			master_key_count, max_master_key_count, &lbl);
 }
 
@@ -243,8 +240,7 @@ int puncture_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned),
  * 	Otherwise returns 0 and out should be filled with the 
  * 	evaluation of PPRF(tag)
  */
-int evaluate(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm,
+int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm,
 		u8 pprf_depth, struct node_label *lbl, u8 *out) {
 	u32 depth;
 	u8 keycpy[PRG_INPUT_LEN];
@@ -256,7 +252,7 @@ int evaluate(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	memset(out, 0xcc, PRG_INPUT_LEN);
 #endif
 
-	root = find_key(node_getter, pprf_base, pprf_depth, lbl, &depth, NULL);
+	root = find_key(pprf_base, pprf_depth, lbl, &depth, NULL);
 	if (!root) 
 		return -1;
 
@@ -276,13 +272,12 @@ int evaluate(struct pprf_keynode *(*node_getter) (void*, unsigned),
 }
 
 
-int evaluate_at_tag(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
+int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u64 tag, u8* out) {
 	struct node_label lbl;
 	init_node_label_from_long(&lbl, pprf_depth, tag);
 
-	return evaluate(node_getter, pprf_base, iv, tfm, pprf_depth, &lbl, out);
+	return evaluate(pprf_base, iv, tfm, pprf_depth, &lbl, out);
 }
 
 
@@ -329,8 +324,7 @@ void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 // }
 
 
-void print_master_key(struct pprf_keynode *(*node_getter) (void*, unsigned), 
-		void* pprf_base, u32 *master_key_count) {
+void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 	u32 i;
 	struct pprf_keynode *node;
 	char node_label_str[8*NODE_LABEL_LEN+1];
@@ -338,7 +332,7 @@ void print_master_key(struct pprf_keynode *(*node_getter) (void*, unsigned),
 	printk(KERN_INFO ": Master key dump START, len=%u:\n", *master_key_count);
 	i=0;
 	for (; i<*master_key_count; ++i) {
-		node = node_getter(pprf_base, i);
+		node = (pprf_base + i);
 		label_to_string(&node->lbl, node_label_str, 8*NODE_LABEL_LEN+1);
 		// trace_printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%16ph, label:%s\n",
 		// 	i, node->il, node->ir, node->key, node_label_str);
