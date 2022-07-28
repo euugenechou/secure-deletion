@@ -12,7 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=10000
+numfiles=1000
 
 for ((i=0; i<$numfiles; i++))
 do
@@ -30,26 +30,17 @@ do
     # sleep 1
     printf -v fname "hello%04d" "$i"
     printf "Deleting $fname...\n"
-    j=i+1
     rm "$fname"
-    # printf -v fname "hello%03d" "$((i + 1))"
-    # cat "$fname"
 done
 
-# cd ..
-# umount home
-# holepunch close test
-
-# printf "ooo\no" | holepunch open /dev/sdb1 test
-# mount /dev/mapper/holepunch /mnt/home
-# cd /mnt/home
-
-sleep 1
+sleep 5
 ls
-printf -v fname "hello%03d" "$((numfiles - 2))"
+printf -v fname "hello%04d" "$((numfiles - 2))"
 cat "$fname"
-printf -v fname "hello%03d" "$((numfiles - 1))"
+printf -v fname "hello%04d" "$((numfiles - 1))"
 cat "$fname"
-# cat hi
-# cat bar
-# cat baz
+
+cd /mnt
+umount home
+# holepunch close test
+# printf "ooo\no" | holepunch open /dev/sdb1 test

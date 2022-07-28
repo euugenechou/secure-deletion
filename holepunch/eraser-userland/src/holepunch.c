@@ -494,7 +494,7 @@ void do_create(char *dev_path, int nv_index) {
     // memset(hp_buf, 0, ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
     hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
 
-    hp_h->master_key_count = 0;
+    hp_h->initialized = 0;
     hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
     hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
 
@@ -507,8 +507,6 @@ void do_create(char *dev_path, int nv_index) {
     hp_h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN 
         - hp_h->key_table_len - hp_h->pprf_key_len -hp_h->pprf_fkt_len;
     hp_h->len = hp_h->data_len + hp_h->pprf_key_len + hp_h->key_table_len + hp_h->pprf_fkt_len;
-
-    hp_h->tag = hp_h->key_table_len;
 
     hp_h->key_table_start = ERASER_HEADER_LEN;
     hp_h->pprf_fkt_start = hp_h->key_table_start + hp_h->key_table_len;

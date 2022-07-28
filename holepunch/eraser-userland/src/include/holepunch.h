@@ -121,14 +121,11 @@ struct holepunch_header {
 	u32 pprf_fkt_top_width;
 	u32 pprf_fkt_bottom_width;
 
-	char pprf_depth;
-
-	/* The fields below are mutable */
-	u32 master_key_count; // how many individual keys make up the master key
 	u32 master_key_limit;
-	u64 tag;
-
+	char pprf_depth;
 	char prg_iv[PRG_INPUT_LEN];
+
+	char initialized;
 };
 
 typedef struct holepunch_filekey_entry {

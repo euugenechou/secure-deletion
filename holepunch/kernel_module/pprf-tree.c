@@ -330,8 +330,7 @@ void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 	char node_label_str[8*NODE_LABEL_LEN+1];
 	
 	printk(KERN_INFO ": Master key dump START, len=%u:\n", *master_key_count);
-	i=0;
-	for (; i<*master_key_count; ++i) {
+	for (i=0; i<*master_key_count; ++i) {
 		node = (pprf_base + i);
 		label_to_string(&node->lbl, node_label_str, 8*NODE_LABEL_LEN+1);
 		// trace_printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%16ph, label:%s\n",

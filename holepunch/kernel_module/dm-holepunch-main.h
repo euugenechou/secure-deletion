@@ -127,13 +127,17 @@ struct holepunch_pprf_fkt_entry {
 #define HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR \
 		(ERASER_SECTOR/sizeof(struct pprf_keynode))
 #define HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR \
-		(ERASER_SECTOR/sizeof(struct holepunch_pprf_fkt_entry))
+		((ERASER_SECTOR - 12)/sizeof(struct holepunch_pprf_fkt_entry))
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_keynode_sector {
 	struct pprf_keynode entries[HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR];
 };
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
+	// The first two fields are only used for the first layer node
+	u32 master_key_count; // how many individual keys make up the master key
+	u64 tag_counter;
+
 	struct holepunch_pprf_fkt_entry entries[HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR];
 };
 
@@ -164,15 +168,11 @@ struct holepunch_header {
 	u32 pprf_fkt_top_width;
 	u32 pprf_fkt_bottom_width;
 
-	u8 pprf_depth;
-
-	/* The fields below are mutable */
-	u32 master_key_count; // how many individual keys make up the master key
 	u32 master_key_limit;
-	u64 tag;
-
-
+	u8 pprf_depth;
 	u8 prg_iv[PRG_INPUT_LEN];
+
+	u8 initialized;
 };
 
 
@@ -245,7 +245,6 @@ struct eraser_dev {
 
 	struct eraser_header *rh;            /* Header, basic metadata. */
 	struct holepunch_header *hp_h;
-	struct rw_semaphore header_sem;
 
 	struct pprf_keynode *pprf_master_key;
 	u32 pprf_master_key_capacity;
