@@ -12,7 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=1000
+numfiles=10000
 
 for ((i=0; i<$numfiles; i++))
 do
@@ -42,5 +42,6 @@ cat "$fname"
 
 cd /mnt
 umount home
-# holepunch close test
-# printf "ooo\no" | holepunch open /dev/sdb1 test
+sleep 25
+holepunch close test
+printf "ooo\no" | holepunch open /dev/sdb1 test

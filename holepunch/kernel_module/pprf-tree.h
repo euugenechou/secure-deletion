@@ -4,9 +4,13 @@
 #include <linux/types.h>
 #include <linux/module.h>
 
-#define PRG_INPUT_LEN 16
+#define PRG_INPUT_LEN 32
 
 static u8 aes_input[2*PRG_INPUT_LEN] =  "\000\001\002\003\004\005\006\007"
+										"\010\011\012\013\014\015\016\017"
+										"\020\021\022\023\024\025\026\027"
+										"\030\031\032\033\034\035\036\037"
+										"\000\001\002\003\004\005\006\007"
 										"\010\011\012\013\014\015\016\017"
 										"\020\021\022\023\024\025\026\027"
 										"\030\031\032\033\034\035\036\037";
@@ -22,7 +26,7 @@ extern struct crypto_blkcipher *tfm;
 // extern u8 pprf_depth;
 
 struct node_label {
-	u8 bstr[NODE_LABEL_LEN];
+	u64 label;
 	u8 depth;
 };
 
@@ -43,7 +47,6 @@ struct node_label {
  * In particular I /don't/ think we need to store depth information
  * in this implementation because the depth matches the depth in the
  * tree exactly
- * 
  */
 
 struct pprf_keynode {
@@ -55,35 +58,31 @@ struct pprf_keynode {
 #endif
 };
 
-// extern struct pprf_keynode* master_key;
-// extern int master_key_count; // how many individual keys make up the master key
-// extern int max_master_key_count;
-
-
-
 void reset_pprf_keynode(struct pprf_keynode *node);
 inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len);
 
 int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf);
 
-bool check_bit_is_set(u8* buf, u8 index);
-void set_bit_in_buf(u8* buf, u8 index, bool val);
+bool check_bit_is_set(u64 tag, u8 index);
+void set_bit_in_buf(u64 *tag, u8 index, bool val);
 
-int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned len);
-int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned factor);
-void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, unsigned len);
+int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, 
+		unsigned len);
+int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, 
+		unsigned factor);
+void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, 
+		unsigned len);
 
-void init_node_label_from_bitstring(struct node_label *lbl, const char* bitstring);
 void init_node_label_from_long(struct node_label *lbl, u8 pprf_depth, u64 val);
 
 struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth, 
-		struct node_label *lbl, u32 *depth, int *index);
+		u64 tag, u32 *depth, int *index) ;
 int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, struct node_label *lbl);
+		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag);
 int puncture_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag);
 int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, struct node_label *lbl, u8 *out);
+		u8 pprf_depth, u64 tag, u8 *out);
 int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u64 tag, u8* out);
 
@@ -93,6 +92,10 @@ int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcip
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
 void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label *lbl);
 void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count);
+#endif
+
+#ifdef HOLEPUNCH_PPRF_TEST
+void run_tests(void);
 #endif
 
 

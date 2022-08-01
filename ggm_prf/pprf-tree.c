@@ -1,4 +1,5 @@
 #include <linux/module.h>
+#include <linux/kernel.h>
 #include <linux/crypto.h>
 #include <crypto/hash.h>
 #include <linux/scatterlist.h>
@@ -263,20 +264,6 @@ int evaluate_at_tag(u64 tag, u8* out) {
 }
 
 
-// Writeback functions
-
-const char *keyfilename = "~holepunch";
-
-int sync_pprf_keynodes(void) {
-
-}
-
-
-int get_pprf_keynodes(void) {
-
-}
-
-
 
 #ifdef DEBUG
 // printing functions
@@ -307,7 +294,7 @@ void print_pkeynode_debug(node_label *lbl) {
 	printk(" Finding key for label %s ...\n", node_label_str);
 	if (pkey) {
 		label_to_string(&pkey->lbl, node_label_str);
-		printk(KERN_INFO "PPRF KEY: %016ph, label: %s, depth: %d\n"
+		printk(KERN_INFO "PPRF KEY: %16ph, label: %s, depth: %d\n"
 				, pkey->key, node_label_str, pkey->lbl.depth);
 	} else {
 		printk(KERN_INFO "Key not present\n");
@@ -322,7 +309,7 @@ void print_master_key(void) {
 	printk(KERN_INFO ": Master key dump START:\n");
 	for (i=0; i<master_key_count; ++i) {
 		label_to_string(&master_key[i].lbl, node_label_str);
-		printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%016ph, label:%s\n",
+		printk(KERN_INFO "n:%u, il:%u, ir:%u, key:%16ph, label:%s\n",
 			i, master_key[i].il, master_key[i].ir, master_key[i].key, node_label_str);
 	}
 
@@ -442,11 +429,11 @@ void test_evaluate_0(void) {
 	u8 out[PRG_INPUT_LEN];
 
 	r = evaluate_at_tag(0, out);
-	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 	r = evaluate_at_tag(1, out);
-	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 	r = evaluate_at_tag(255, out);
-	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 
 	printk(KERN_INFO "Puncturing tag=1...\n");
 	r = puncture_at_tag(1);
@@ -454,11 +441,11 @@ void test_evaluate_0(void) {
 	print_master_key();
 
 	r = evaluate_at_tag(0, out);
-	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 	r = evaluate_at_tag(1, out);
-	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 	r = evaluate_at_tag(255, out);
-	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 
 	printk(KERN_INFO "Puncturing tag=0...\n");
 	r = puncture_at_tag(0);
@@ -466,11 +453,11 @@ void test_evaluate_0(void) {
 	print_master_key();
 
 	r = evaluate_at_tag(0, out);
-	printk(KERN_INFO "Evaluation at tag 0: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 0: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 	r = evaluate_at_tag(1, out);
-	printk(KERN_INFO "Evaluation at tag 1: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 1: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 	r = evaluate_at_tag(255, out);
-	printk(KERN_INFO "Evaluation at tag 255: %s (%016ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
+	printk(KERN_INFO "Evaluation at tag 255: %s (%16ph)\n", r == 0?"SUCCESS" :"PUNCTURED", out);
 }
 
 void test_evaluate_1(void) {
@@ -487,11 +474,13 @@ void test_evaluate_1(void) {
 		for (i=0; i<16; ++i) {
 			r = evaluate_at_tag(i, out);
 			BUG_ON(unlikely(r && i>rd));
-			printk(KERN_INFO "Evaluation at tag %u: %s (%016ph)\n", i, r == 0?"SUCCESS" :"PUNCTURED", out);
+			printk(KERN_INFO "Evaluation at tag %u: %s (%16ph)\n", i, r == 0?"SUCCESS" :"PUNCTURED", out);
 		}
 	}
 
 }
+
+
 
 
 void run_tests(void) {
@@ -599,13 +588,14 @@ static int __init ggm_pprf_init(void) {
 	tfm = crypto_alloc_blkcipher("ctr(aes)", 0, 0);
 	sg_init_one(&sg_in, aes_input, 2*PRG_INPUT_LEN);
 
-	printk(KERN_INFO "ggm pprf testing module loaded.\nIV = %016ph\n", iv);
+	printk(KERN_INFO "ggm pprf testing module loaded.\nIV = %16ph\n", iv);
     // print_pkey(&master_key[0]);
 
 
 #ifdef DEBUG
 	printk("\n === RUNNING TESTS ===\n\n");
-	run_tests();
+	// run_tests();
+	test_little_endian();
 #endif
 
 #ifdef TIME

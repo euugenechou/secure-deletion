@@ -1,9 +1,19 @@
 obj-m := dm-holepunch.o
 dm-holepunch-y := dm-holepunch-main.o pprf-tree.o
 
+BATCH=0
+ifeq ($(BATCH),1)
+ccflags-y += -DHOLEPUNCH_BATCHING
+endif
+
+PPRF_TEST=0
+ifeq ($(PPRF_TEST),1)
+ccflags-y += -DHOLEPUNCH_PPRF_TEST
+endif
+
 
 all:
-	make -C ~/Desktop/linux M=$(PWD) modules ccflags-y="$(ccflags-y)"
+	make -C ~/Desktop/linux M=$(PWD) modules ccflags-y="$(ccflags-y)" V=1
 
 debug: ccflags-y += -DHOLEPUNCH_DEBUG
 debug: all
