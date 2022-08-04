@@ -11,6 +11,12 @@ ifeq ($(PPRF_TEST),1)
 ccflags-y += -DHOLEPUNCH_PPRF_TEST
 endif
 
+PPRF_TIME=0
+ifeq ($(PPRF_TIME),1)
+ccflags-y += -DHOLEPUNCH_PPRF_TIME
+endif
+
+
 
 all:
 	make -C ~/Desktop/linux M=$(PWD) modules ccflags-y="$(ccflags-y)" V=1

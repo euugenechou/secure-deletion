@@ -105,6 +105,11 @@
 			up_read(rwsem);\
 			KWORKERMSG("PUT read rwsem: " msg "\n", ## arg); \
 		} while (0)
+	#define HP_DOWNGRADE_WRITE(rwsem, msg, arg...) \
+		do { \
+			downgrade_write(rwsem);\
+			KWORKERMSG("DOWNGRADE rwsem: " msg "\n", ## arg); \
+		} while (0)
 	#define HP_DOWN(sem, msg, arg...) \
 		do { \
 			KWORKERMSG("TRY sem: " msg "\n", ## arg); \
@@ -121,6 +126,7 @@
 	#define HP_UP_WRITE(rwsem, msg, arg...) up_write(rwsem)
 	#define HP_DOWN_READ(rwsem, msg, arg...) down_read(rwsem)
 	#define HP_UP_READ(rwsem, msg, arg...) up_read(rwsem)
+	#define HP_DOWNGRADE_WRITE(rwsem, msg, arg...) downgrade_write(rwsem);
 	#define HP_DOWN(sem, msg, arg...) down(sem)
 	#define HP_UP(sem, msg, arg...) up(sem)
 #endif
@@ -170,7 +176,7 @@ struct holepunch_header {
 	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
 	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for PPRF FKT encryption. */
+	u8 pprf_fkt_iv[ERASER_IV_LEN];        /* IV for PPRF FKT encryption. */
 
 	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
 		       * kernel side. */
@@ -191,7 +197,7 @@ struct holepunch_header {
 
 	u32 master_key_limit;
 	u8 pprf_depth;
-	u8 prg_iv[PRG_INPUT_LEN];
+	u8 prg_iv[ERASER_IV_LEN];
 
 	u8 initialized;
 };
@@ -201,14 +207,14 @@ struct holepunch_header {
  * Map entry and cache structs.
  */
 /* Size padded to 64 bytes, must be multiple of sector size. */
-struct eraser_map_entry {
-	u8 key[ERASER_KEY_LEN];
-	u8 iv[ERASER_IV_LEN];
-	u64 status;
-	u64 padding;
-};
+// struct eraser_map_entry {
+// 	u8 key[ERASER_KEY_LEN];
+// 	u8 iv[ERASER_IV_LEN];
+// 	u64 status;
+// 	u64 padding;
+// };
 
-#define ERASER_MAP_CACHE_BUCKETS 32//1024
+#define ERASER_MAP_CACHE_BUCKETS 1024
 #define ERASER_MAP_PER_SECTOR 64
 
 struct eraser_map_cache {
@@ -332,7 +338,7 @@ struct eraser_header {
 	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
 	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
+	u8 pprf_fkt_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
 
 	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
 		       * kernel side. */
@@ -417,10 +423,11 @@ static void holepunch_init_master_key(struct eraser_dev *rd, unsigned mode);
 static struct pprf_keynode *holepunch_read_pprf_key(struct eraser_dev *rd);
 static int holepunch_write_pprf_key(struct eraser_dev *rd);
 static int holepunch_write_pprf_key_sector(struct eraser_dev *rd, unsigned index, 
-	struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
-static inline void holepunch_check_refresh_pprf_key(struct eraser_dev *rd,
-		u32 punctures_requested);
-static int holepunch_refresh_pprf_key(struct eraser_dev *rd);
+		struct crypto_blkcipher *tfm, char *map, bool fkt_refresh);
+// static inline int holepunch_check_refresh_pprf_key(struct eraser_dev *rd,
+// 		u32 punctures_requested, struct semaphore *cache_lock);
+static int holepunch_refresh_pprf_key(struct eraser_dev *rd, 
+		struct semaphore *cache_lock);
 
 #ifdef HOLEPUNCH_DEBUG
 static void holepunch_print_master_key(struct eraser_dev *rd);
@@ -468,12 +475,12 @@ static inline int holepunch_get_sector_index_for_inode
 		(struct eraser_dev *rd, u64 ino);
 
 static int holepunch_persist_unlink(struct eraser_dev *rd, 
-		struct eraser_map_cache *c);
+		struct eraser_map_cache *c, struct semaphore *cache_lock);
 static void holepunch_do_unlink(struct work_struct *work);
 
 
 
 MODULE_AUTHOR("Wittmann Goh");
-MODULE_DESCRIPTION("holepunch target - based off of ERASER");
+MODULE_DESCRIPTION("HOLEPUNCH target - based off of ERASER");
 MODULE_LICENSE("GPL");
 #endif

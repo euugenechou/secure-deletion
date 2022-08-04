@@ -38,6 +38,9 @@
 #define COMMAND_CLOSE "close"
 #define COMMAND_LIST "list"
 
+#define COMMAND_PPRF_TEST "pprf_test"
+#define COMMAND_PPRF_TIME "pprf_time"
+
 const char *argp_program_version = "ERASER ver.2016.xx.xx";
 const char *argp_program_bug_address = "<onarliog@ccs.neu.edu>";
 static const char doc[] = "Create, open, close, list ERASER devices.";

@@ -512,11 +512,8 @@ void do_create(char *dev_path, int nv_index) {
     hp_h->pprf_fkt_start = hp_h->key_table_start + hp_h->key_table_len;
     hp_h->pprf_key_start = hp_h->pprf_fkt_start + hp_h->pprf_fkt_len;
     hp_h->data_start = hp_h->pprf_key_start + hp_h->pprf_key_len;
-#ifdef ERASER_DEBUG
-    memset(hp_h->prg_iv, 0x88, PRG_INPUT_LEN);
-#else
-    get_random_data(hp_h->prg_iv, PRG_INPUT_LEN);
-#endif
+    
+    memset(hp_h->prg_iv, 0, ERASER_IV_LEN);
 
 #ifdef ERASER_DEBUG
     print_green("Key table start: %llu\n", hp_h->key_table_start);

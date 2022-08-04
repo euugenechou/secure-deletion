@@ -23,7 +23,6 @@ extern struct crypto_blkcipher *tfm;
 #define MAX_DEPTH 64 
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 
-// extern u8 pprf_depth;
 
 struct node_label {
 	u64 label;
@@ -63,8 +62,8 @@ inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len);
 
 int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf);
 
-bool check_bit_is_set(u64 tag, u8 index);
-void set_bit_in_buf(u64 *tag, u8 index, bool val);
+inline bool check_bit_is_set(u64 tag, u8 index);
+inline void set_bit_in_buf(u64 *tag, u8 index, bool val);
 
 int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, 
 		unsigned len);
@@ -86,8 +85,6 @@ int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tf
 int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
 		u8 pprf_depth, u64 tag, u8* out);
 
-
-
 #ifdef HOLEPUNCH_DEBUG
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
 void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label *lbl);
@@ -96,6 +93,9 @@ void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count);
 
 #ifdef HOLEPUNCH_PPRF_TEST
 void run_tests(void);
+#endif
+#ifdef HOLEPUNCH_PPRF_TIME
+void preliminary_benchmark(void);
 #endif
 
 

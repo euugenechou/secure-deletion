@@ -45,9 +45,9 @@
 
 #define ERASER_PROC_FILE "/proc/erasertab"
 
-#define PRG_INPUT_LEN 16
-#define HOLEPUNCH_PPRF_DEPTH 18
-#define HOLEPUNCH_REFRESH_INTERVAL 10
+#define PRG_INPUT_LEN 32
+#define HOLEPUNCH_PPRF_DEPTH 19
+#define HOLEPUNCH_REFRESH_INTERVAL 10000
 #define HOLEPUNCH_KEY_GROWTH       2*HOLEPUNCH_PPRF_DEPTH
 
 #define ERASER_CREATE 0
@@ -61,11 +61,10 @@
 #define MAX_DEPTH 64 
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 struct node_label {
-	unsigned char bstr[NODE_LABEL_LEN];
+	u64 label;
 	unsigned char depth;
 };
 
-#define PRG_INPUT_LEN 16
 struct pprf_keynode {
 	u32 il;
 	u32 ir;
