@@ -31,16 +31,23 @@ while [ "$1" != "" ]; do
   shift
 done
 
+# Make setting RAM size automatic.
+memInfo=$(grep MemTotal /proc/meminfo)
+memTot=$(echo $memInfo | cut -d ' ' -f 2)
+memMb=$(( memTot / 1000 ))
+
+printf "[+] Detected RAM size: $memMb MB\n"
+
 printf "[+] Running Bonnie++ with $FILES files across $DIRS sub-directories...\n"
 
 # Run Bonnie++ with 512*1024 files for creation/deletion.
 # Set -r to installed RAM. Bonnie++ uses RAM*2 for file size.
 # User root:root for running in QEMU.
-#time bonnie++ -d . -r 16000 -n 512 -u root:root > perf.txt
-time bonnie++ -d . -r 16000 -n $FILES:$DIRS > perf.txt
+#time bonnie++ -d . -r $memMb -n 512 -u root:root > perf.txt
+time bonnie++ -d . -r $memMb -n $FILES:$DIRS > perf.txt
 
 # Generate HTML report.
 tail -1 perf.txt | bon_csv2html > perf.html
 
 # View report.
-firefox perf.html &
+#firefox perf.html &
