@@ -75,6 +75,7 @@ int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_coun
 #ifdef HOLEPUNCH_DEBUG
 	printk("RESIZING: current capacity = %u\n", *max_master_key_count);
 #endif	
+	BUG_ON((*max_master_key_count)*factor*sizeof(struct pprf_keynode) == 0);
 	tmp = vmalloc((*max_master_key_count)*factor*sizeof(struct pprf_keynode));
 	if (!tmp)
 		return -ENOMEM;

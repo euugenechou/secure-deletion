@@ -33,10 +33,6 @@
 #include "pprf-tree.h"
 
 
-
-
-
-
 #define DM_MSG_PREFIX "eraser"
 
 #define ERASER_SECTOR 4096   /* In bytes. */
@@ -368,10 +364,6 @@ struct eraser_unlink_work {
         struct work_struct work;
 };
 
-static int eraser_set_master_key(struct eraser_dev *rd);
-
-static inline void holepunch_write_header(struct eraser_dev *rd);
-static inline struct holepunch_header *holepunch_read_header(struct eraser_dev *rd);
 
 
 #define HOLEPUNCH_PPRF_EXPANSION_FACTOR 4
@@ -381,6 +373,22 @@ enum {
 	HOLEPUNCH_PPRF_NORMAL =1,
 	HOLEPUNCH_PPRF_REFRESH,
 };
+
+/* Cache eviction timeouts. TODO: Tweak these. */
+/* All in jiffies. */
+#define ERASER_CACHE_EXP_FIRST_ACCESS (60 * HZ)
+#define ERASER_CACHE_EXP_LAST_ACCESS (15 * HZ)
+#define ERASER_CACHE_EXP_LAST_DIRTY (5 * HZ)
+#define ERASER_CACHE_MEMORY_PRESSURE 0
+
+/* In seconds. */
+#define ERASER_CACHE_EVICTION_PERIOD 5
+
+
+static int eraser_set_master_key(struct eraser_dev *rd);
+
+static inline void holepunch_write_header(struct eraser_dev *rd);
+static inline struct holepunch_header *holepunch_read_header(struct eraser_dev *rd);
 
 // struct pprf_keynode *holepunch_get_keynode_by_index(void* ptr, unsigned index);
 

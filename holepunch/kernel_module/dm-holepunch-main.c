@@ -713,8 +713,10 @@ static int holepunch_set_new_tpm_key(struct eraser_dev *rd)
 	}
 	msleep(10);
 	while (!test_and_clear_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status)) {
+#ifdef HOLEPUNCH_DEBUG		
 		DMCRIT("Holepunch waiting for new key to be set.");
-		wait_for_completion_timeout(&rd->master_key_wait, 3 * HZ);
+#endif
+		wait_for_completion_timeout(&rd->master_key_wait, 1 * HZ);
 	}
 	memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
 // #ifdef HOLEPUNCH_DEBUG
@@ -1132,16 +1134,6 @@ static void eraser_force_evict_map_cache(struct eraser_dev *rd)
 		up(&rd->cache_lock[i]);
 	}
 }
-
-/* Cache eviction timeouts. TODO: Tweak these. */
-/* All in jiffies. */
-#define ERASER_CACHE_EXP_FIRST_ACCESS (60 * HZ)
-#define ERASER_CACHE_EXP_LAST_ACCESS (15 * HZ)
-#define ERASER_CACHE_EXP_LAST_DIRTY 0 //(5 * HZ)
-#define ERASER_CACHE_MEMORY_PRESSURE 0
-
-/* In seconds. */
-#define ERASER_CACHE_EVICTION_PERIOD 5
 
 /* Cache eviction runs in separate kernel thread, periodically. */
 static int holepunch_evict_map_cache(void *data)

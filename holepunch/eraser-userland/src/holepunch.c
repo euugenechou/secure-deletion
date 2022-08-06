@@ -27,6 +27,7 @@
 #include "holepunch.h"
 #include "tpm.h"
 
+
 void handle_signal(int sig) {
     if (sig == SIGTERM) {
         print_red("Received end signal. Exiting.");
@@ -47,7 +48,6 @@ struct eraser_nvram *nvram;
 
 /* Prompts the user for a password and generates/derives the crypto key. */
 void get_keys(int op, struct eraser_header *h) {
-
     char *pass;
     char *pass_v;
     char pass_key[ERASER_KEY_LEN];
@@ -495,10 +495,14 @@ void do_create(char *dev_path, int nv_index) {
     hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
 
     hp_h->initialized = 0;
-    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
-    hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
-
     hp_h->key_table_len = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
+    HOLEPUNCH_PPRF_DEPTH = 32 - __builtin_clz((unsigned int)hp_h->key_table_len +
+            HOLEPUNCH_REFRESH_INTERVAL);
+// #ifdef ERASER_DEBUG
+    print_green("-> Holepunch PPRF depth: %u\n\n", HOLEPUNCH_PPRF_DEPTH);
+// #endif
+    hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
+    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
 
     hp_h->pprf_key_len = div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
     hp_h->pprf_fkt_bottom_width = div_ceil(hp_h->pprf_key_len, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
