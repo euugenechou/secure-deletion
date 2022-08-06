@@ -52,8 +52,10 @@ First, install the Holepunch kernel module on the QEMU instance using:
 
 Then install the Holepunch userspace tool:
 
-`cd holepunch-userland`
-`make install`
+```
+cd holepunch-userland
+make install
+```
 
 You now have Holepunch installed and ready to go!
 
@@ -61,8 +63,9 @@ You now have Holepunch installed and ready to go!
 
 To use Holepunch (or Eraser) we will need to make sure that the TPM is setup with an owner password.
 
-`tpm_createek`
-`tpm_takeownership`
+```tpm_createek
+tpm_takeownership
+```
 
 When prompted, enter a memorable password for unlocking and using the TPM. 
 
