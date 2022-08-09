@@ -59,6 +59,7 @@ struct eraser_header {
     char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
     char slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
 
+	char file_iv_gen_key[ERASER_KEY_LEN];	  /* Key for file iv generation*/
     u64 nv_index; /* TPM NVRAM index to store the master key in. */
 
     /* All in ERASER sectors. */

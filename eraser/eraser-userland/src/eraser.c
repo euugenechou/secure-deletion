@@ -460,6 +460,7 @@ void do_create(char *dev_path, int nv_index) {
 #endif
 
     get_random_data(h->slot_map_iv, ERASER_IV_LEN);
+    get_random_data(h->file_iv_gen_key, ERASER_IV_LEN);
 
     /* Prompt user for password. */
     get_keys(ERASER_CREATE, h);

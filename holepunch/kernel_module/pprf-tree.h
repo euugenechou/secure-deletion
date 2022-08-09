@@ -48,10 +48,21 @@ struct node_label {
  * tree exactly
  */
 
-struct pprf_keynode {
-	u32 il;
-	u32 ir;
-	u8 key[PRG_INPUT_LEN];
+enum {
+	PPRF_INTERNAL = 0,
+	PPRF_KEYLEAF,
+	PPRF_PUNCTURE,
+};
+
+struct __attribute__((packed)) pprf_keynode {
+	union {
+		struct {
+			u32 il;
+			u32 ir;
+		} next;
+		u8 key[PRG_INPUT_LEN];
+	} v;
+	u8 flag;
 #ifdef HOLEPUNCH_DEBUG
 	struct node_label lbl;
 #endif

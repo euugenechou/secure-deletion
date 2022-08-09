@@ -33,7 +33,7 @@
 #include "pprf-tree.h"
 
 
-#define DM_MSG_PREFIX "eraser"
+#define DM_MSG_PREFIX "holepunch"
 
 #define ERASER_SECTOR 4096   /* In bytes. */
 #define ERASER_HW_SECTOR 512 /* In bytes. */
@@ -70,7 +70,7 @@
 #define ERASER_ERROR 1
 
 /* /proc file listing mapped ERASER devices. */
-#define ERASER_PROC_FILE "erasertab"
+#define HOLEPUNCH_PROC_FILE "holepunchtab"
 
 #define KWORKERMSG(msg, arg...) \
 	do { \
@@ -130,7 +130,6 @@
 
 struct holepunch_filekey_entry {
 	u8 key[ERASER_KEY_LEN];
-	u8 iv[ERASER_IV_LEN];
 };
 
 #define HOLEPUNCH_FILEKEYS_PER_SECTOR \
@@ -174,6 +173,8 @@ struct holepunch_header {
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
 	u8 pprf_fkt_iv[ERASER_IV_LEN];        /* IV for PPRF FKT encryption. */
 
+	u8 file_iv_gen_key[ERASER_KEY_LEN];	  /* Key for file iv generation*/
+
 	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
 		       * kernel side. */
 
@@ -211,7 +212,7 @@ struct holepunch_header {
 // };
 
 #define ERASER_MAP_CACHE_BUCKETS 1024
-#define ERASER_MAP_PER_SECTOR 64
+#define ERASER_MAP_PER_SECTOR 6400
 
 struct eraser_map_cache {
 	u32 slot_no;
@@ -288,7 +289,8 @@ struct eraser_dev {
 
 	/* Per CPU crypto transforms for everything. We go full parallel. */
 	unsigned cpus;
-	struct crypto_blkcipher **tfm;    /* Sector and file encryption. */
+	struct crypto_blkcipher **tfm;    /* AES-CBC for ector and file encryption. */
+	struct crypto_blkcipher **pprf_tfm; /* AES-EBC for pprf PRG */   
 	struct eraser_rand_context *rand;   /* AES-CTR context for random data. */
 	struct crypto_cipher **essiv_tfm; /* IV derivation for sector encryption. */
 
@@ -385,6 +387,11 @@ enum {
 #define ERASER_CACHE_EVICTION_PERIOD 5
 
 
+static void eraser_derive_file_iv(struct eraser_dev *rd, u8 *derived_iv, 
+		u8 *kiv, unsigned long index);
+static void eraser_derive_sector_iv(u8 *iv, unsigned long index, struct eraser_dev *rd);
+
+
 static int eraser_set_master_key(struct eraser_dev *rd);
 
 static inline void holepunch_write_header(struct eraser_dev *rd);
@@ -442,12 +449,9 @@ static void holepunch_print_master_key(struct eraser_dev *rd);
 #endif
 
 
-// static inline struct holepunch_filekey_sector *holepunch_get_fkt_sector_for_inode 
-// 		(struct eraser_dev *rd, u64 ino);
-// static inline int holepunch_get_sector_index_for_inode (struct eraser_dev *rd, u64 ino);
-
-
-static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, u8 *iv, struct eraser_dev *rd);
+static void holepunch_aes_ecb(struct eraser_dev *rd, u8 *key, u8 *in, 
+		u8 *out, unsigned len);
+static void holepunch_get_key_for_inode(u64 inode_no, u8 *key, struct eraser_dev *rd);
 
 /* Cache */
 static struct eraser_map_cache *eraser_search_map_cache(struct eraser_dev *rd, 

@@ -165,6 +165,7 @@ struct eraser_dev {
 	/* Per CPU crypto transforms for everything. We go full parallel. */
 	unsigned cpus;
 	struct crypto_blkcipher **tfm;    /* Sector and file encryption. */
+	struct crypto_blkcipher **pprf_tfm; /* AES-EBC for pprf PRG */   
 	struct eraser_rand_context *rand;   /* AES-CTR context for random data. */
 	struct crypto_cipher **essiv_tfm; /* IV derivation for sector encryption. */
 
@@ -198,6 +199,8 @@ struct eraser_header {
 	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
 	u8 slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
+
+	u8 file_iv_gen_key[ERASER_KEY_LEN];	  /* Key for file iv generation*/
 
 	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
 		       * kernel side. */
@@ -989,8 +992,33 @@ static void eraser_encrypted_bio_end_io(struct bio *encrypted_bio)
 	eraser_free_io_work(w);
 }
 
-static void eraser_derive_file_iv(u8 *iv, unsigned long index) {
-	*(unsigned long *)iv |= index;
+static void holepunch_aes_ecb(struct eraser_dev *rd, u8 *key, u8 *in, 
+		u8 *out, unsigned len) 
+{
+	struct blkcipher_desc desc;
+	struct scatterlist src, dst;
+	
+	desc.tfm = rd->pprf_tfm[get_cpu()];
+	sg_init_table(&src, 1);
+	sg_init_table(&dst, 1);
+	sg_set_buf(&src, in, len);
+	sg_set_buf(&dst, out, len);
+
+	desc.flags = 0;
+	crypto_blkcipher_setkey(desc.tfm, key, len);
+	if (crypto_blkcipher_encrypt(&desc, &dst, &src, len))
+			DMCRIT("Error doing crypto");
+	
+	put_cpu();
+}
+
+static void eraser_derive_file_iv(struct eraser_dev *rd, u8 *derived_iv, 
+		u8 *kiv, unsigned long index)
+{
+	memset(derived_iv, 0, ERASER_IV_LEN);
+	*(unsigned long *)derived_iv = index;
+	holepunch_aes_ecb(rd, rd->rh->file_iv_gen_key, derived_iv, 
+		derived_iv, ERASER_IV_LEN);
 }
 
 static void eraser_derive_sector_iv(u8 *iv, unsigned long index, struct eraser_dev *rd) {
@@ -1034,12 +1062,12 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w)
 		vec = bio_iter_iovec(clone, clone->bi_iter);
 		bio_advance_iter(clone, &clone->bi_iter, vec.bv_len);
 
-		memcpy(derived_iv, iv, ERASER_IV_LEN);
-		if (w->is_file)
-			eraser_derive_file_iv(derived_iv, vec.bv_page->index);
-		else
+		if (w->is_file) {
+			eraser_derive_file_iv(w->rd, derived_iv, iv, clone->bi_iter.bi_sector);
+		} else {
+			memcpy(derived_iv, iv, ERASER_IV_LEN);
 			eraser_derive_sector_iv(derived_iv, clone->bi_iter.bi_sector, w->rd);
-
+		}
 		p = eraser_allocate_page(w->rd);
 		eraser_do_crypto_between_pages(vec.bv_page, p, 0, ERASER_SECTOR, key, derived_iv,
 					NULL, ERASER_ENCRYPT, w->rd);
@@ -1076,12 +1104,12 @@ static void eraser_do_read_bottomhalf(struct eraser_io_work *w)
 		vec = bio_iter_iovec(clone, clone->bi_iter);
 		bio_advance_iter(clone, &clone->bi_iter, vec.bv_len);
 
-		memcpy(derived_iv, iv, ERASER_IV_LEN);
-		if (w->is_file)
-			eraser_derive_file_iv(derived_iv, vec.bv_page->index);
-		else
+		if (w->is_file) {
+			eraser_derive_file_iv(w->rd, derived_iv, iv, clone->bi_iter.bi_sector);
+		} else {
+			memcpy(derived_iv, iv, ERASER_IV_LEN);
 			eraser_derive_sector_iv(derived_iv, clone->bi_iter.bi_sector, w->rd);
-
+		}
 		eraser_do_crypto_from_page(vec.bv_page, 0, ERASER_SECTOR, key, derived_iv,
 					NULL, ERASER_DECRYPT, w->rd);
 	}
@@ -1719,6 +1747,15 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		}
 	}
 
+	rd->pprf_tfm = kmalloc(rd->cpus * sizeof(struct crypto_blkcipher *), GFP_KERNEL);
+	for (i = 0; i < rd->cpus; ++i) {
+		rd->pprf_tfm[i] = crypto_alloc_blkcipher("ecb(aes)", 0, 0);
+		if (IS_ERR(rd->pprf_tfm[i])) {
+			ti->error = "Could not create crypto transform for pprf.";
+			goto init_pprf_tfm_fail;
+		}
+	}
+
 	/* ESSIV crypto transforms. */
 	if (eraser_get_essiv_salt(rd->enc_key, salt) != ERASER_SUCCESS) {
 		DMCRIT("SALT FAIL");
@@ -1859,6 +1896,13 @@ init_essiv_fail:
 
 	i = rd->cpus;
 compute_essiv_salt_fail: /* Fall through. */
+init_pprf_tfm_fail:
+	/* We may have created some of the pprf tfms. */
+	for (i = i - 1; i >= 0; --i)
+		crypto_free_blkcipher(rd->pprf_tfm[i]);
+	kfree(rd->pprf_tfm);
+
+	i = rd->cpus;
 init_tfm_fail:
 	/* We may have created some of the tfms. */
 	for (i = i - 1; i >= 0; --i)

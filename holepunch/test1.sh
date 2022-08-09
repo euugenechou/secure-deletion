@@ -3,7 +3,7 @@
 printf "\n Remember to lower the refresh interval to 10 for this test ...\n\n"
 sleep 2
 
-insmod /holepunch/kernel_module/dm-holepunch.ko
+insmod /root/dm-holepunch.ko
 printf "ooo\no\no" | holepunch create /dev/sdb1 5
 printf "ooo\no" | holepunch open /dev/sdb1 test
 mkfs.ext4 /dev/mapper/holepunch
