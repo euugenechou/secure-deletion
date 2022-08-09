@@ -28,10 +28,6 @@ You'll also want to setup another drive that will be used by Holepunch to store 
 
 This outputs a 64GB drive `encrypted.img` that will get used by Holepunch. Feel free to make the drive bigger or smaller depending on your tests.   
 
-Finally we need to set up the TPM simulator with
-
-`./setup_tpm.sh`
-
 
 ##### Starting QEMU
 
