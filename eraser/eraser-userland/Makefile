@@ -4,8 +4,6 @@ DEPDIR=$(SRCDIR)/include
 BUILDDIR=build
 OBJDIR=$(BUILDDIR)/obj
 
-# TSSDIR = /home/wittmann/Desktop/trousers/src/include
-
 _OBJ=main.o eraser.o utils.o crypto.o netlink.o tpm.o
 OBJ=$(patsubst %,$(OBJDIR)/%,$(_OBJ))
 
@@ -14,7 +12,7 @@ DEP=$(patsubst %,$(DEPDIR)/%,$(_DEP))
 
 CC=gcc
 CFLAGS= -I$(DEPDIR) -Wall -Wno-pointer-sign -Wno-format -O2
-LIBS=-lcrypto -ldevmapper -ltspi 
+LIBS=-lcrypto -ldevmapper -ltspi
 
 all: dirs $(EXEC)
 

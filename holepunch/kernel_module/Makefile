@@ -1,3 +1,4 @@
+LINUXROOT = ~/Desktop/linux
 obj-m := dm-holepunch.o
 dm-holepunch-y := dm-holepunch-main.o pprf-tree.o
 
@@ -19,7 +20,7 @@ endif
 
 
 all:
-	make -C ~/Desktop/linux M=$(PWD) modules ccflags-y="$(ccflags-y)" V=1
+	make -C $(LINUXROOT) M=$(PWD) modules ccflags-y="$(ccflags-y)" V=1
 
 debug: ccflags-y += -DHOLEPUNCH_DEBUG
 debug: all
@@ -28,4 +29,4 @@ debug_semas: ccflags-y += -DHOLEPUNCH_SEMA -DHOLEPUNCH_DEBUG
 debug_semas: all
 
 clean:
-	make -C ~/Desktop/linux M=$(PWD) clean
+	make -C $(LINUXROOT) M=$(PWD) clean
