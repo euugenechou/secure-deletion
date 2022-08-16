@@ -1,6 +1,4 @@
-#include <linux/crypto.h>
 #include <crypto/hash.h>
-#include <crypto/rng.h>
 #include <linux/scatterlist.h>
 #include <linux/vmalloc.h>
 #include <linux/bug.h>
@@ -12,38 +10,8 @@
 #include <linux/timekeeping.h>
 #endif
 
-
-struct scatterlist sg_in;
-struct crypto_blkcipher *tfm;
-
-
 void reset_pprf_keynode(struct pprf_keynode *node) {
 	memset(node, 0, sizeof(struct pprf_keynode));
-}
-
-
-/* Returns crypto-safe random bytes from kernel pool. 
-   Taken from eraser code */
-inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len)
-{
-	crypto_get_default_rng();
-	crypto_rng_get_bytes(crypto_default_rng, data, len);
-	crypto_put_default_rng();
-}
-
-/* We are using ECB */
-int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf) 
-{
-	struct blkcipher_desc desc;
-	struct scatterlist dst;
-	// see comment in eraser code around ln 615 --  will this affect us?
-	desc.tfm = tfm;
-	desc.flags = 0;
-	crypto_blkcipher_setkey(desc.tfm, key, PRG_INPUT_LEN);
-	// crypto_blkcipher_set_iv(desc.tfm, iv, PRG_INPUT_LEN);
-
-	sg_init_one(&dst, buf, 2*PRG_INPUT_LEN);
-	return crypto_blkcipher_encrypt(&desc, &dst, &sg_in, 2*PRG_INPUT_LEN);
 }
 
 inline bool check_bit_is_set(u64 tag, u8 depth) 
@@ -58,7 +26,6 @@ inline void set_bit_in_buf(u64 *tag, u8 depth, bool val)
 	else
 		*tag &= (-1ull) - (1ull << (63-depth));
 }
-
 
 // some of these need error returns
 
@@ -101,7 +68,7 @@ int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_coun
 void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, unsigned len) 
 {
 	memset(master_key, 0, len);
-    ggm_prf_get_random_bytes_kernel(master_key->v.key, PRG_INPUT_LEN);
+    kernel_random(master_key->v.key, PRG_INPUT_LEN);
 	if (master_key_count)
 		*master_key_count = 1;
 	master_key->flag = PPRF_KEYLEAF;
@@ -158,15 +125,15 @@ struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
  * Otherwise returns the index of the PPRF keynode that was changed
  * as a result of the puncture (used for writeback purposes).
  */
-int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag) {
+int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
+	u32 *master_key_count, u32 *max_master_key_count, u64 tag) {
 	u32 depth;
 	u8 keycpy[PRG_INPUT_LEN];
 	u8 tmp[2*PRG_INPUT_LEN];
 	bool set;
 	int root_index;
 	struct pprf_keynode *root;
-	
+
 	root = find_key(pprf_base, pprf_depth, tag, &depth, &root_index);
 	// it will be NULL if its already been punctured, in which case we just return
 	if (!root) {
@@ -178,7 +145,7 @@ int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tf
 	memset(root->v.key, 0, PRG_INPUT_LEN);
 	root->flag = PPRF_INTERNAL;
 	while (depth < pprf_depth) {
-		prg_from_aes_ctr(keycpy, iv, tfm, tmp);
+		p(data, keycpy, tmp);
 		set = check_bit_is_set(tag, depth);
 		if (set) {
 			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
@@ -210,17 +177,17 @@ int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tf
 	}
 	// At the end of the loop, the root node is always a punctured node. So set links accordingly
 	// root->il = -1;
-	// root->ir = -1;	
+	// root->ir = -1;
 	root->flag = PPRF_PUNCTURE;
-	
+
 	return root_index;
 }
 
-int puncture_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag) 
+int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
+		u32 *master_key_count, u32 *max_master_key_count, u64 tag)
 {
 	tag <<= (64-pprf_depth);
-	return puncture(pprf_base, iv, tfm, pprf_depth, master_key_count, max_master_key_count, tag);
+	return puncture(pprf_base, pprf_depth, p, data, master_key_count, max_master_key_count, tag);
 }
 
 
@@ -229,14 +196,14 @@ int puncture_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcip
  * 	Otherwise returns 0 and out should be filled with the 
  * 	evaluation of PPRF(tag)
  */
-int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm,
-		u8 pprf_depth, u64 tag, u8 *out) {
+int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8 *out)
+{
 	u32 depth;
 	u8 keycpy[PRG_INPUT_LEN];
 	u8 tmp[2*PRG_INPUT_LEN];
 	bool set;
-	struct pprf_keynode *root; 
-	
+	struct pprf_keynode *root;
+
 #ifdef HOLEPUNCH_DEBUG
 	memset(out, 0xcc, PRG_INPUT_LEN);
 #endif
@@ -247,7 +214,7 @@ int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tf
 	memcpy(keycpy, root->v.key, PRG_INPUT_LEN);
 
 	for (; depth<pprf_depth; ++depth) {
-		prg_from_aes_ctr(keycpy, iv, tfm, tmp);
+		p(data, keycpy, tmp);
 		set = check_bit_is_set(tag, depth);
 		if (set) {
 			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
@@ -259,14 +226,11 @@ int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tf
 	return 0;
 }
 
-int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u64 tag, u8* out)
+int evaluate_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8* out)
 {
 	tag <<= (64-pprf_depth);
-	return evaluate(pprf_base, iv, tfm, pprf_depth, tag, out);
+	return evaluate(pprf_base, pprf_depth, p, data, tag, out);
 }
-
-
 
 
 #ifdef HOLEPUNCH_DEBUG
@@ -464,12 +428,8 @@ void test_evaluate_1(struct pprf_keynode **base, u32 *max_count, u32 *count,
 void run_tests(void) {
 	struct pprf_keynode *base;
 	u32 max_count, count;
-	u8 iv[PRG_INPUT_LEN];
-	struct crypto_blkcipher *tfm;
-	
-	memset(iv, 0, PRG_INPUT_LEN);
+
 	base = NULL;
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
 
 	printk(KERN_INFO "\n running test_puncture_0\n");
 	test_puncture_0(&base, &max_count, &count, tfm, iv);	
@@ -482,10 +442,8 @@ void run_tests(void) {
 	test_evaluate_1(&base, &max_count, &count, tfm, iv);
 
 	printk(KERN_INFO "\n tests complete\n");
-	
-	crypto_free_blkcipher(tfm);
-	vfree(base);
 
+	vfree(base);
 }
 
 #endif
@@ -499,7 +457,7 @@ void evaluate_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 
 	u64 nsstart, nsend;
 	u8 out[PRG_INPUT_LEN];
 
-	ggm_prf_get_random_bytes_kernel((u8*) tag_array, sizeof(u64)*reps);
+	kernel_random((u8*) tag_array, sizeof(u64)*reps);
 	printk(KERN_INFO "Begin evaluation: keylength = %u\n", *count);
 	nsstart = ktime_get_ns();
 	for(n=0; n<reps; ++n) {
@@ -514,7 +472,7 @@ void puncture_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 
 	int n;
 	u64 nsstart, nsend;
 
-	ggm_prf_get_random_bytes_kernel((u8*) tag_array, reps*sizeof(u64));
+	kernel_random((u8*) tag_array, reps*sizeof(u64));
 	printk(KERN_INFO "Puncturing %u times:\n", reps);
 	nsstart = ktime_get_ns();
 	for (n=0; n<reps; ++n) {
@@ -528,19 +486,14 @@ void preliminary_benchmark_cycle(void) {
 	struct pprf_keynode *base;
 	u32 max_count, count;
 	u8 pprf_depth;
-	u8 iv[PRG_INPUT_LEN];
-	struct crypto_blkcipher *tfm;
 	u64 *tag_array;
 	int maxreps = 100000;
-	
-	memset(iv, 0, PRG_INPUT_LEN);
+
 	base = NULL;
-	tfm = crypto_alloc_blkcipher("cbc(aes)", 0, 0);
 	pprf_depth = 17;
 
-
 	printk(KERN_INFO "Depth = %u, %u reps per eval cycle\n", pprf_depth, maxreps);
-	
+
 	tag_array = vmalloc(maxreps* sizeof(u64));
 	alloc_master_key(&base, &max_count, 
 		2*pprf_depth*sizeof(struct pprf_keynode)*30000);
@@ -565,7 +518,7 @@ void preliminary_benchmark_cycle(void) {
 	vfree(tag_array);
 }
 
-void preliminary_benchmark(void) {	
+void preliminary_benchmark(void) {
 	preliminary_benchmark_cycle();
 }
 

@@ -159,7 +159,7 @@ void cleanup_keys() {
 
 void do_init_filekeys(int fd, struct holepunch_header *hp_h, u64 inode_count) {
     struct holepunch_filekey_sector *filekey_table;
-    struct holepunch_filekey_entry *entries;
+    struct holepunch_key *entries;
     unsigned sec_num, sectors;
     u32 ino_num;
 
@@ -177,7 +177,7 @@ void do_init_filekeys(int fd, struct holepunch_header *hp_h, u64 inode_count) {
 #endif
         }
     }
-    write_sectors(fd,  (char *) filekey_table, hp_h->key_table_len);
+    write_sectors(fd,  (char *) filekey_table, hp_h->pprf_fkt_start - hp_h->key_table_start);
     free(filekey_table);
 
 #ifdef ERASER_DEBUG
@@ -401,7 +401,7 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     netlink_pid = start_netlink_client(eraser_name);
     if (netlink_pid != 0) {
         /* Device-mapper open. */
-        if (!open_eraser(dev_path, mapped_dev, hp_h->data_len, eraser_name, mapped_dev_path, netlink_pid)) {
+        if (!open_eraser(dev_path, mapped_dev, hp_h->data_end - hp_h->data_start, eraser_name, mapped_dev_path, netlink_pid)) {
             print_red("Cannot open ERASER device!\n");
             kill(netlink_pid, SIGTERM);
             goto free_name;
@@ -412,17 +412,11 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
 
     #ifdef ERASER_DEBUG
         print_green("Key table start: %llu\n", hp_h->key_table_start);
-        print_green("Key table sectors: %llu\n", hp_h->key_table_len);
-
         print_green("PPRF fkt start: %llu\n", hp_h->pprf_fkt_start);
-        print_green("PPRF fkt sectors: %llu\n", hp_h->pprf_fkt_len);
-
         print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
-        print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
         print_green("PPRF key max elts: %llu\n", hp_h->master_key_limit);
-
         print_green("Data start: %llu\n", hp_h->data_start);
-        print_green("Data sectors: %llu\n", hp_h->data_len);
+        print_green("Data end: %llu\n", hp_h->data_end);
     #endif
 
 
@@ -490,43 +484,29 @@ void do_create(char *dev_path, int nv_index) {
     hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
 
     hp_h->initialized = 0;
-    hp_h->key_table_len = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
-    HOLEPUNCH_PPRF_DEPTH = 32 - __builtin_clz((unsigned int)hp_h->key_table_len +
-            HOLEPUNCH_REFRESH_INTERVAL);
-// #ifdef ERASER_DEBUG
-    print_green("-> Holepunch PPRF depth: %u\n\n", HOLEPUNCH_PPRF_DEPTH);
-// #endif
-    hp_h->pprf_depth = HOLEPUNCH_PPRF_DEPTH;
-    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
-
-    hp_h->pprf_key_len = div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
-    hp_h->pprf_fkt_bottom_width = div_ceil(hp_h->pprf_key_len, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
-    hp_h->pprf_fkt_top_width = div_ceil(hp_h->pprf_fkt_bottom_width, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
-    hp_h->pprf_fkt_len = hp_h->pprf_fkt_bottom_width + hp_h->pprf_fkt_top_width;
-    hp_h->data_len = (dev_size / ERASER_SECTOR_LEN) - ERASER_HEADER_LEN 
-        - hp_h->key_table_len - hp_h->pprf_key_len -hp_h->pprf_fkt_len;
-    hp_h->len = hp_h->data_len + hp_h->pprf_key_len + hp_h->key_table_len + hp_h->pprf_fkt_len;
-
     hp_h->key_table_start = ERASER_HEADER_LEN;
-    hp_h->pprf_fkt_start = hp_h->key_table_start + hp_h->key_table_len;
-    hp_h->pprf_key_start = hp_h->pprf_fkt_start + hp_h->pprf_fkt_len;
-    hp_h->data_start = hp_h->pprf_key_start + hp_h->pprf_key_len;
-    
-    memset(hp_h->prg_iv, 0, ERASER_IV_LEN);
+    hp_h->pprf_fkt_start = hp_h->key_table_start + div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
+    hp_h->pprf_fkt_bottom_width = div_ceil(hp_h->pprf_fkt_start - hp_h->key_table_start,
+        HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
+    hp_h->pprf_fkt_top_width = div_ceil(hp_h->pprf_fkt_bottom_width, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
+    hp_h->pprf_key_start = hp_h->pprf_fkt_start + hp_h->pprf_fkt_bottom_width + hp_h->pprf_fkt_top_width;
+    hp_h->data_start = hp_h->pprf_key_start +
+        div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
+    hp_h->data_end = dev_size / ERASER_SECTOR_LEN;
+    hp_h->pprf_depth =  32 - __builtin_clz(hp_h->pprf_fkt_start
+        - hp_h->key_table_start + HOLEPUNCH_REFRESH_INTERVAL);
+// #ifdef ERASER_DEBUG
+    print_green("-> Holepunch PPRF depth: %u\n\n", hp_h->pprf_depth);
+// #endif
+    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
 
 #ifdef ERASER_DEBUG
     print_green("Key table start: %llu\n", hp_h->key_table_start);
-    print_green("Key table sectors: %llu\n", hp_h->key_table_len);
-
     print_green("PPRF fkt start: %llu\n", hp_h->pprf_fkt_start);
-    print_green("PPRF fkt sectors: %llu\n", hp_h->pprf_fkt_len);
-
     print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
-    print_green("PPRF key sectors: %llu\n", hp_h->pprf_key_len);
     print_green("PPRF key max elts: %llu\n", hp_h->master_key_limit);
-
     print_green("Data start: %llu\n", hp_h->data_start);
-    print_green("Data sectors: %llu\n", hp_h->data_len);
+    print_green("Data end: %llu\n", hp_h->data_end);
 #endif
 
     /* Prompt user for password. */

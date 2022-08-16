@@ -61,21 +61,21 @@ unsigned char HOLEPUNCH_PPRF_DEPTH;
 #define MAX_DEPTH 64 
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 struct node_label {
-	u64 label;
-	unsigned char depth;
+    u64 label;
+    unsigned char depth;
 };
 
 struct __attribute__((packed)) pprf_keynode {
-	union {
-		struct {
-			u32 il;
-			u32 ir;
-		} next;
-		char key[PRG_INPUT_LEN];
-	} v;
-	char flag;
+    union {
+        struct {
+            u32 il;
+            u32 ir;
+        } next;
+        char key[PRG_INPUT_LEN];
+    } v;
+    char flag;
 #ifdef DEBUG
-	struct node_label lbl;
+    struct node_label lbl;
 #endif
 };
 
@@ -101,70 +101,60 @@ struct eraser_header {
 };
 
 
-/* ERASER header. Must match the definition in the user space. */
+/* Holepunch header; must match the definition in kernel. */
 struct holepunch_header {
-	char enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
-	char enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
-	char enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
-	char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-	char slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
+    u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
+    u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
+    u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
+    u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
+    u64 nv_index;                         /* Master key TPM NVRAM index. */
 
-	char file_iv_gen_key[ERASER_KEY_LEN];	/* Key for file iv generation*/
+    /* IV generation key, encrypted by master key. */
+    u8 iv_key[ERASER_KEY_LEN];
 
-	u64 nv_index; /* TPM NVRAM index to store the master key, unused on the
-		       * kernel side. */
+    /* All in ERASER sectors, strictly consecutive; header starts at zero. */
+    u64 key_table_start;
+    u64 pprf_fkt_start;
+    u64 pprf_key_start;
+    u64 data_start;
+    u64 data_end; /* One past the last accesible data sector. */
 
-	/* All in ERASER sectors. */
-	u64 len;
-	u64 key_table_start;
-	u64 key_table_len;
-	u64 pprf_fkt_start;
-	u64 pprf_fkt_len;
-	u64 pprf_key_start;
-	u64 pprf_key_len;
-	u64 data_start;
-	u64 data_len;
+    u32 master_key_count; // how many individual keys make up the master key
+    u64 tag_counter;
 
-	u32 pprf_fkt_top_width;
-	u32 pprf_fkt_bottom_width;
+    u32 pprf_fkt_top_width;
+    u32 pprf_fkt_bottom_width;
 
-	u32 master_key_limit;
-	char pprf_depth;
-	char prg_iv[PRG_INPUT_LEN];
+    u32 master_key_limit;
+    u8 pprf_depth;
 
-	char initialized;
+    u8 initialized;
 };
 
-typedef struct holepunch_filekey_entry {
-	char key[ERASER_KEY_LEN];
-} holepunch_filekey_entry;
-
-#define HOLEPUNCH_FILEKEYS_PER_SECTOR 4088/sizeof(holepunch_filekey_entry)
-
-typedef struct __attribute__((aligned(4096))) holepunch_filekey_sector  {
-	u64 tag;
-	holepunch_filekey_entry entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
-} holepunch_filekey_sector;
-
-struct holepunch_pprf_fkt_entry {
-	char key[ERASER_KEY_LEN];
-	char iv[ERASER_IV_LEN];
+struct holepunch_key {
+    u8 key[ERASER_KEY_LEN];
 };
 
+#define HOLEPUNCH_FILEKEYS_PER_SECTOR ((ERASER_SECTOR - 32)/ERASER_KEY_LEN)
 #define HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR \
-		(ERASER_SECTOR/sizeof(struct pprf_keynode))
-#define HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR \
-		(ERASER_SECTOR/sizeof(struct holepunch_pprf_fkt_entry))
+        (ERASER_SECTOR/sizeof(struct pprf_keynode))
+#define HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR (ERASER_SECTOR/ERASER_KEY_LEN)
+
+struct __attribute__((aligned(ERASER_SECTOR))) holepunch_filekey_sector {
+    u64 tag;
+    u64 magic1;
+    u64 magic2;
+    u64 magic3;
+    struct holepunch_key entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
+};
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_keynode_sector {
-	struct pprf_keynode entries[HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR];
+    struct pprf_keynode entries[HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR];
 };
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
-	struct holepunch_pprf_fkt_entry entries[HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR];
+    struct holepunch_key entries[HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR];
 };
-
-
 
 
 

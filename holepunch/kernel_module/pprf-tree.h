@@ -3,24 +3,23 @@
 
 #include <linux/types.h>
 #include <linux/module.h>
+#include <linux/crypto.h>
+#include <crypto/rng.h>
 
 #define PRG_INPUT_LEN 32
 
-static u8 aes_input[2*PRG_INPUT_LEN] =  "\000\001\002\003\004\005\006\007"
-										"\010\011\012\013\014\015\016\017"
-										"\020\021\022\023\024\025\026\027"
-										"\030\031\032\033\034\035\036\037"
-										"\000\001\002\003\004\005\006\007"
-										"\010\011\012\013\014\015\016\017"
-										"\020\021\022\023\024\025\026\027"
-										"\030\031\032\033\034\035\036\037";
+typedef void (*prg) (void *, u8 *, u8 *);
 
-extern u8 iv[PRG_INPUT_LEN];
-extern struct scatterlist sg_in;
-extern struct crypto_blkcipher *tfm;
+/* Return crypto-safe random data from kernel pool. */
+static inline void kernel_random(u8 *data, u64 len)
+{
+	crypto_get_default_rng();
+	crypto_rng_get_bytes(crypto_default_rng, data, len);
+	crypto_put_default_rng();
+}
 
 // This is arbitrary. it can support 2^64 inodes. Currently supporting anything larger would involve some rewriting
-#define MAX_DEPTH 64 
+#define MAX_DEPTH 64
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 
 
@@ -69,9 +68,6 @@ struct __attribute__((packed)) pprf_keynode {
 };
 
 void reset_pprf_keynode(struct pprf_keynode *node);
-inline void ggm_prf_get_random_bytes_kernel(u8 *data, u64 len);
-
-int prg_from_aes_ctr(u8* key, u8* iv, struct crypto_blkcipher *tfm, u8* buf);
 
 inline bool check_bit_is_set(u64 tag, u8 index);
 inline void set_bit_in_buf(u64 *tag, u8 index, bool val);
@@ -85,16 +81,14 @@ void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count,
 
 void init_node_label_from_long(struct node_label *lbl, u8 pprf_depth, u64 val);
 
-struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth, 
+struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
 		u64 tag, u32 *depth, int *index) ;
-int puncture(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag);
-int puncture_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u32 *master_key_count, u32 *max_master_key_count, u64 tag);
-int evaluate(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u64 tag, u8 *out);
-int evaluate_at_tag(struct pprf_keynode *pprf_base, u8* iv, struct crypto_blkcipher *tfm, 
-		u8 pprf_depth, u64 tag, u8* out);
+int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
+	u32 *master_key_count, u32 *max_master_key_count, u64 tag);
+int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
+	u32 *master_key_count, u32 *max_master_key_count, u64 tag);
+int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8 *out);
+int evaluate_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8* out);
 
 #ifdef HOLEPUNCH_DEBUG
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
