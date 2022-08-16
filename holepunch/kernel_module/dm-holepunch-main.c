@@ -91,7 +91,7 @@ static struct page *eraser_allocate_page(struct eraser_dev *rd)
 
 	p = mempool_alloc(rd->page_pool, GFP_KERNEL);
 	if (!p)
-		DMCRIT("Cannot allocate new page!");
+		DMWARN("Cannot allocate new page!");
 
 	return p;
 }
@@ -116,20 +116,14 @@ static struct bio *eraser_allocate_bio_multi_vector(int vec_no, struct eraser_de
 
 	b = bio_alloc_bioset(GFP_KERNEL, vec_no, rd->bioset);
 	if (!b)
-		DMCRIT("Cannot allocate new bio!");
+		DMWARN("Cannot allocate new bio!");
 
 	return b;
 }
 
-static struct bio *eraser_allocate_bio(struct eraser_dev *rd)
+static inline struct bio *eraser_allocate_bio(struct eraser_dev *rd)
 {
-	struct bio *b;
-
-	b = eraser_allocate_bio_multi_vector(1, rd);
-	if (!b)
-		DMCRIT("Cannot allocate new bio!");
-
-	return b;
+	return eraser_allocate_bio_multi_vector(1, rd);
 }
 
 static struct eraser_io_work *eraser_allocate_io_work(struct bio *bio, struct eraser_dev *rd)
@@ -137,12 +131,9 @@ static struct eraser_io_work *eraser_allocate_io_work(struct bio *bio, struct er
 	struct eraser_io_work *w;
 
 	w = mempool_alloc(rd->io_work_pool, GFP_NOIO);
-	if (!w)
-	{
-		DMCRIT("Cannot allocate new io work!");
-	}
-	else
-	{
+	if (!w) {
+		DMWARN("Cannot allocate new io work!");
+	} else {
 		w->bio = bio;
 		w->rd = rd;
 	}
@@ -160,7 +151,7 @@ static struct eraser_unlink_work *eraser_allocate_unlink_work(unsigned long inod
 
 	w = mempool_alloc(rd->unlink_work_pool, GFP_ATOMIC);
 	if (!w)	{
-		DMCRIT("Cannot allocate new unlink work!");
+		DMWARN("Cannot allocate new unlink work!");
 	} else {
 		w->inode_no = inode_no;
 		w->rd = rd;
@@ -178,10 +169,11 @@ static struct eraser_map_cache *eraser_allocate_map_cache(struct eraser_dev *rd)
 	struct eraser_map_cache *c;
 
 	c = mempool_alloc(rd->map_cache_pool, GFP_NOIO);
-	if (!c)
-		DMCRIT("Cannot allocate new map cache!");
-
-	memset(c, 0, sizeof(*c));
+	if (!c) {
+		DMWARN("Cannot allocate new map cache!");
+	} else {
+		memset(c, 0, sizeof *c);
+	}
 	return c;
 }
 
@@ -215,14 +207,12 @@ static struct eraser_dev *eraser_lookup_dev(char *dev_path)
 	struct eraser_dev *cur;
 	dev_t dev;
 
-	if (__eraser_lookup_dev(dev_path, &dev) == ERASER_ERROR)
-	{
-		DMCRIT("Device lookup failed!");
+	if (__eraser_lookup_dev(dev_path, &dev) == ERASER_ERROR) {
+		DMERR("Device lookup failed!");
 		return NULL;
 	}
 
-	list_for_each_entry(cur, &eraser_dev_list, list)
-	{
+	list_for_each_entry(cur, &eraser_dev_list, list) {
 		if (cur->real_dev->bdev->bd_dev == dev)
 			return cur;
 	}
@@ -279,7 +269,7 @@ static void *__eraser_rw_sector(struct block_device *bdev, u64 sector,
 	struct page *p;
 
 	if (rw == WRITE && !write_buf) {
-		DMCRIT("Write buffer is NULL, aborting");
+		DMWARN("Write buffer is NULL, aborting");
 		return NULL;
 	}
 
@@ -523,7 +513,7 @@ static struct holepunch_filekey_sector *__holepunch_read_key_table_sector(
 	holepunch_evaluate_at_tag(rd, data->tag, key, NULL);
 	HP_UP_READ(&rd->pprf_sem, "PPRF: read sector");
 	// #ifdef HOLEPUNCH_DEBUG
-	// 		printk(KERN_INFO "READ TABLE: PPRF output for sector %u, tag %llu: %32ph \n",
+	// 		DMINFO("READ TABLE: PPRF output for sector %u, tag %llu: %32ph \n",
 	// 			sectorno, (map+sectorno)->tag, pprf_out);
 	// #endif
 	holepunch_cbc_filekey_sector(rd, data, ERASER_DECRYPT, key, sectorno);
@@ -567,23 +557,23 @@ static void __holepunch_write_key_table_sector(struct eraser_dev *rd,
 // TODO Journal here
 static int holepunch_set_new_tpm_key(struct eraser_dev *rd)
 {
-	// DMCRIT("Holepunch set new key entry.\n");
+	// DMINFO("Holepunch set new key entry.\n");
 	kernel_random(rd->new_master_key, ERASER_KEY_LEN);
 	__set_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status);
 	while (eraser_set_master_key(rd)) {
-		// DMCRIT("Holepunch cannot set new TPM key...\n");
+		// DMINFO("Holepunch cannot set new TPM key...\n");
 		msleep(100);
 	}
 	msleep(10);
 	while (!test_and_clear_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status)) {
 #ifdef HOLEPUNCH_DEBUG
-		DMCRIT("Holepunch waiting for new key to be set.");
+		DMINFO("Holepunch waiting for new key to be set.");
 #endif
 		wait_for_completion_timeout(&rd->master_key_wait, 1 * HZ);
 	}
 	memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
 // #ifdef HOLEPUNCH_DEBUG
-// 	printk(KERN_INFO "New TPM key: %32ph\n", rd->master_key);
+// 	DMINFO("New TPM key: %32ph\n", rd->master_key);
 // #endif
 	return 0;
 }
@@ -626,7 +616,7 @@ static void holepunch_init_pprf_fkt(struct eraser_dev *rd)
 }
 
 /* Does not write to disk */
-// TODO Journalling needed here too (maybe condense functions as well)
+// TODO Journaling needed here too (maybe condense functions as well)
 static int holepunch_refresh_pprf_fkt(struct eraser_dev *rd, 
 		unsigned bot_sect_start, unsigned bot_sect_end)
 {
@@ -694,7 +684,7 @@ static int holepunch_write_pprf_fkt(struct eraser_dev *rd)
 	unsigned sector;
 
 #ifdef HOLEPUNCH_DEBUG
-	printk(KERN_INFO "Writing PPRF FKT: encrypting wih M = %32ph\n", rd->master_key);
+	DMINFO("Writing PPRF FKT: encrypting wih M = %32ph\n", rd->master_key);
 #endif
 	p = eraser_allocate_page(rd);
 	data = kmap(p);
@@ -711,7 +701,7 @@ static int holepunch_write_pprf_fkt(struct eraser_dev *rd)
 	eraser_free_page(p, rd);
 
 #ifdef HOLEPUNCH_DEBUG
-	printk(KERN_INFO "PPRF FKT written!\n");
+	DMINFO("PPRF FKT written!\n");
 #endif
 	return 0;
 }
@@ -723,7 +713,7 @@ static void holepunch_read_pprf_fkt(struct eraser_dev *rd)
 	u64 index, sectorno;
 
 #ifdef HOLEPUNCH_DEBUG
-	printk(KERN_INFO "Reading PPRF FKT: decrypting wih M = %32ph\n", rd->master_key);
+	DMINFO("Reading PPRF FKT: decrypting wih M = %32ph\n", rd->master_key);
 #endif
 	rd->pprf_fkt = vmalloc(ERASER_SECTOR * (rd->hp_h->pprf_key_start - rd->hp_h->pprf_fkt_start));
 	if (!rd->pprf_fkt) {
@@ -741,7 +731,7 @@ static void holepunch_read_pprf_fkt(struct eraser_dev *rd)
 
 	// Decrypt base layer
 	for (index = 0; index < rd->hp_h->pprf_fkt_bottom_width; ++index) {
-		// printk(KERN_INFO "LOADING BOTTOM SECTOR %u\n", index);
+		// DMINFO("LOADING BOTTOM SECTOR %u\n", index);
 		sectorno = rd->hp_h->pprf_fkt_start + rd->hp_h->pprf_fkt_top_width + index;
 		data = eraser_rw_sector(sectorno, READ, NULL, rd);
 		parent = holepunch_get_parent_entry_for_fkt_bottom_layer(rd, index);
@@ -751,7 +741,7 @@ static void holepunch_read_pprf_fkt(struct eraser_dev *rd)
 	}
 
 #ifdef HOLEPUNCH_DEBUG
-	printk(KERN_INFO "PPRF FKT read!\n");
+	DMINFO("PPRF FKT read!\n");
 #endif
 }
 
@@ -1267,7 +1257,7 @@ static void eraser_do_io(struct work_struct *work)
 {
 	struct eraser_io_work *w = container_of(work, struct eraser_io_work, work);
 
-	// DMCRIT("I/O from PID %i\n", task_pid_nr(current));
+	// DMINFO("I/O from PID %i\n", task_pid_nr(current));
 
 	if (bio_data_dir(w->bio) == WRITE)
 		eraser_do_write_bottomhalf(w);
@@ -1465,7 +1455,7 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio)
 
 	bio->bi_bdev = rd->real_dev->bdev;
 	// #ifdef HOLEPUNCH_DEBUG
-	// 	printk(KERN_INFO "request remapped from sector %u to sector %u\n", bio->bi_iter.bi_sector,
+	// 	DMINFO("request remapped from sector %u to sector %u\n", bio->bi_iter.bi_sector,
 	// 							bio->bi_iter.bi_sector + (rd->hp_h->data_start * ERASER_SECTOR_SCALE));
 	// #endif
 	bio->bi_iter.bi_sector = bio->bi_iter.bi_sector + (rd->hp_h->data_start * ERASER_SECTOR_SCALE);
@@ -1537,18 +1527,17 @@ static int eraser_kill_helper(struct eraser_dev *rd)
 
 	skb_out = nlmsg_new(0, GFP_KERNEL);
 	if (!skb_out)
-		DMCRIT("Cannot allocate sk_buff.");
+		DMWARN("Cannot allocate sk_buff.");
 
 	h = nlmsg_put(skb_out, 0, 0, ERASER_MSG_DIE, 0, GFP_KERNEL);
 	if (!h)
-		DMCRIT("Cannot put msg.");
+		DMWARN("Cannot put msg.");
 
 	NETLINK_CB(skb_out).dst_group = 0;
 
 	/* Send! */
-	if (nlmsg_unicast(eraser_sock, skb_out, rd->helper_pid) != 0)
-	{
-		DMCRIT("Error sending DIE.");
+	if (nlmsg_unicast(eraser_sock, skb_out, rd->helper_pid) != 0) {
+		DMWARN("Cannot send DIE.");
 		return ERASER_ERROR;
 	}
 
@@ -1564,11 +1553,11 @@ static int eraser_get_master_key(struct eraser_dev *rd)
 
 	skb_out = nlmsg_new(ERASER_MSG_PAYLOAD, GFP_KERNEL);
 	if (!skb_out)
-		DMCRIT("Cannot allocate sk_buff.");
+		DMWARN("Cannot allocate sk_buff.");
 
 	h = nlmsg_put(skb_out, 0, 0, ERASER_MSG_GET_KEY, ERASER_MSG_PAYLOAD, GFP_KERNEL);
 	if (!h)
-		DMCRIT("Cannot put msg.");
+		DMWARN("Cannot put msg.");
 
 	NETLINK_CB(skb_out).dst_group = 0;
 
@@ -1578,7 +1567,7 @@ static int eraser_get_master_key(struct eraser_dev *rd)
 
 	/* Send! */
 	if (nlmsg_unicast(eraser_sock, skb_out, rd->helper_pid) != 0) {
-		DMCRIT("Error sending GET KEY.");
+		DMWARN("Cannot send GET KEY.");
 		return ERASER_ERROR;
 	}
 
@@ -1594,11 +1583,11 @@ static int eraser_set_master_key(struct eraser_dev *rd)
 
 	skb_out = nlmsg_new(ERASER_MSG_PAYLOAD, GFP_KERNEL);
 	if (!skb_out)
-		DMCRIT("Cannot allocate sk_buff.");
+		DMWARN("Cannot allocate sk_buff.");
 
 	h = nlmsg_put(skb_out, 0, 0, ERASER_MSG_SET_KEY, ERASER_MSG_PAYLOAD, 0);
 	if (!h)
-		DMCRIT("Cannot put msg.");
+		DMWARN("Cannot put msg.");
 
 	NETLINK_CB(skb_out).dst_group = 0;
 
@@ -1610,7 +1599,7 @@ static int eraser_set_master_key(struct eraser_dev *rd)
 
 	/* Send! */
 	if (nlmsg_unicast(eraser_sock, skb_out, rd->helper_pid) != 0) {
-		DMCRIT("Error sending SET KEY.");
+		DMWARN("Cannot send SET KEY.");
 		return ERASER_ERROR;
 	}
 
@@ -1632,7 +1621,7 @@ static void eraser_netlink_recv(struct sk_buff *skb_in)
 	len = nlmsg_len(h);
 
 	if (len != ERASER_MSG_PAYLOAD) {
-		DMCRIT("Unknown message format.");
+		DMERR("Unknown message format.");
 		return;
 	}
 
@@ -1650,14 +1639,14 @@ static void eraser_netlink_recv(struct sk_buff *skb_in)
 	up(&eraser_dev_lock);
 
 	if (!found)	{
-		DMCRIT("Message to unknown device.");
+		DMERR("Message to unknown device.");
 		return;
 	}
 
 	/* Now rd holds our device. */
 	if (h->nlmsg_type == ERASER_MSG_GET_KEY) {
 		/* We got the master key. */
-		DMCRIT("Received master key.");
+		DMINFO("Received master key.");
 		if (test_and_clear_bit(ERASER_KEY_GET_REQUESTED, &rd->master_key_status)) {
 			holepunch_ecb(rd, rd->master_key, payload + ERASER_NAME_LEN,
 				ERASER_KEY_LEN, ERASER_DECRYPT, rd->sec_key);
@@ -1665,22 +1654,22 @@ static void eraser_netlink_recv(struct sk_buff *skb_in)
 			set_bit(ERASER_KEY_GOT_KEY, &rd->master_key_status);
 			complete(&rd->master_key_wait);
 		} else {
-			DMCRIT("Received unsolicited key. Dropping.");
+			DMWARN("Received unsolicited key. Dropping.");
 		}
 	}
 	else if (h->nlmsg_type == ERASER_MSG_SET_KEY) {
 		/* We got confirmation that master key is synched to the vault. */
 #ifdef HOLEPUNCH_DEBUG
-		DMCRIT("Received key sync ACK.");
+		DMINFO("Received key sync ACK.");
 #endif
 		if (test_and_clear_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status)) {
 			set_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status);
 			complete(&rd->master_key_wait);
 		} else {
-			DMCRIT("Received unsolicited ACK. Dropping.");
+			DMWARN("Received unsolicited ACK. Dropping.");
 		}
 	} else {
-		DMCRIT("Unknown message type.");
+		DMERR("Unknown message type.");
 	}
 
 	/* TODO: Do *we* free the sk_buff here? Somebody please document netlink
@@ -1717,14 +1706,14 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -EINVAL;
 	}
 
-	DMCRIT("Creating ERASER on %s", argv[0]);
+	DMINFO("Creating ERASER on %s", argv[0]);
 
 	if (sscanf(argv[4], "%d%c", &helper_pid, &dummy) != 1)
 	{
 		ti->error = "Invalid arguments.";
 		return -EINVAL;
 	}
-	DMCRIT("Helper PID: %d", helper_pid);
+	DMINFO("Helper PID: %d", helper_pid);
 
 	/* Lock everything until we make sure this device is create-able. */
 	down(&eraser_dev_lock);
@@ -1787,11 +1776,11 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	rd->master_key_status = 0;
 	__set_bit(ERASER_KEY_GET_REQUESTED, &rd->master_key_status);
 	while (eraser_get_master_key(rd) != ERASER_SUCCESS) {
-		DMCRIT("Cannot send GET master key. Will retry.");
+		DMWARN("Cannot send GET master key. Will retry.");
 		msleep(3000);
 	}
 	while (!test_bit(ERASER_KEY_GOT_KEY, &rd->master_key_status)) {
-		DMCRIT("Waiting for master key.");
+		DMINFO("Waiting for master key.");
 		wait_for_completion_timeout(&rd->master_key_wait, 3 * HZ);
 	}
 
@@ -1813,19 +1802,19 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Read header from disk. */
 	holepunch_read_header(rd);
 #ifdef HOLEPUNCH_DEBUG
-	printk(KERN_INFO "\nKernel-land info:\n");
-	printk(KERN_INFO "Key table start: %llu\n", rd->hp_h->key_table_start);
-	printk(KERN_INFO "Key table sectors: %llu\n", rd->hp_h->pprf_fkt_start - rd->hp_h->key_table_start);
+	DMINFO("\nKernel-land info:\n");
+	DMINFO("Key table start: %llu\n", rd->hp_h->key_table_start);
+	DMINFO("Key table sectors: %llu\n", rd->hp_h->pprf_fkt_start - rd->hp_h->key_table_start);
 
-	printk(KERN_INFO "PPRF fkt start: %llu\n", rd->hp_h->pprf_fkt_start);
-	printk(KERN_INFO "PPRF fkt sectors: %llu\n", rd->hp_h->pprf_key_start - rd->hp_h->pprf_fkt_start);
+	DMINFO("PPRF fkt start: %llu\n", rd->hp_h->pprf_fkt_start);
+	DMINFO("PPRF fkt sectors: %llu\n", rd->hp_h->pprf_key_start - rd->hp_h->pprf_fkt_start);
 
-	printk(KERN_INFO "PPRF key start: %llu\n", rd->hp_h->pprf_key_start);
-	printk(KERN_INFO "PPRF key sectors: %llu\n", rd->hp_h->data_start - rd->hp_h->pprf_key_start);
+	DMINFO("PPRF key start: %llu\n", rd->hp_h->pprf_key_start);
+	DMINFO("PPRF key sectors: %llu\n", rd->hp_h->data_start - rd->hp_h->pprf_key_start);
 
-	printk(KERN_INFO "Data start: %llu\n", rd->hp_h->data_start);
-	printk(KERN_INFO "Data sectors: %llu\n", rd->hp_h->data_end - rd->hp_h->data_start);
-	printk(KERN_INFO "IV gen key %32ph\n", rd->hp_h->iv_key);
+	DMINFO("Data start: %llu\n", rd->hp_h->data_start);
+	DMINFO("Data sectors: %llu\n", rd->hp_h->data_end - rd->hp_h->data_start);
+	DMINFO("IV gen key %32ph\n", rd->hp_h->iv_key);
 #endif
 
 	/* Work caches and queues. */
@@ -1913,7 +1902,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 #endif
 	} else {
 #ifdef HOLEPUNCH_DEBUG
-		printk(KERN_INFO "Retrieving pprf key\n");
+		DMINFO("Retrieving pprf key\n");
 #endif
 		holepunch_read_pprf_fkt(rd);
 		if (!rd->pprf_fkt) {
@@ -1961,7 +1950,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	rd->stats_puncture = 0;
 	rd->stats_refresh = 0;
 
-	DMCRIT("Success.");
+	DMINFO("Success.");
 	return 0;
 
 	/* Lots to clean up after an error. */
@@ -2029,7 +2018,7 @@ static void eraser_dtr(struct dm_target *ti)
 	// TODO is this lock necessary (even if it is, is it needed for the whole
 	// thing)?
 	HP_DOWN_WRITE(&rd->pprf_sem, "PPRF on DTR");
-	DMCRIT("Destroying.");
+	DMINFO("Destroying.");
 
 	kfree(rd->real_dev_path);
 	kfree(rd->virt_dev_path);
@@ -2092,7 +2081,7 @@ static void eraser_dtr(struct dm_target *ti)
 	KWORKERMSG("== Usage stats ==\nEvals: %llu\nPunctures: %llu\nRefreshes: %llu\n",
 		rd->stats_evaluate, rd->stats_puncture, rd->stats_refresh);
 
-	DMCRIT("Success.");
+	DMINFO("Success.");
 }
 
 static void eraser_io_hints(struct dm_target *ti, struct queue_limits *limits)
@@ -2118,16 +2107,16 @@ static struct target_type eraser_target = {
 static void config_messages(void)
 {
 #ifdef HOLEPUNCH_BATCHING
-	printk(KERN_INFO "Batching enabled\n");
+	DMINFO("Batching enabled\n");
 #else
-	printk(KERN_INFO "Batching disabled\n");
+	DMINFO("Batching disabled\n");
 #endif
 #ifdef HOLEPUNCH_DEBUG
-	printk(KERN_INFO "HOLEPUNCH compiled in debug mode\n");
+	DMINFO("HOLEPUNCH compiled in debug mode\n");
 #endif
-	printk(KERN_INFO "\nHOLEPUNCH_PPRF_KEYNODES_PER_SECTOR: %lu\n", HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
-	printk(KERN_INFO "HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR: %lu\n", HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
-	printk(KERN_INFO "HOLEPUNCH_FILEKEYS_PER_SECTOR: %lu\n", HOLEPUNCH_FILEKEYS_PER_SECTOR);
+	DMINFO("\nHOLEPUNCH_PPRF_KEYNODES_PER_SECTOR: %lu\n", HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
+	DMINFO("HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR: %lu\n", HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
+	DMINFO("HOLEPUNCH_FILEKEYS_PER_SECTOR: %lu\n", HOLEPUNCH_FILEKEYS_PER_SECTOR);
 }
 
 
@@ -2143,25 +2132,24 @@ static int __init dm_eraser_init(void)
 	preliminary_benchmark();
 #endif
 	eraser_sock = netlink_kernel_create(&init_net, ERASER_NETLINK, &eraser_netlink_cfg);
-	if (!eraser_sock)
-	{
+	if (!eraser_sock) {
 		DMERR("Netlink setup failed.");
 		return -1;
 	}
 
 	r = register_kprobe(&eraser_unlink_kprobe);
-	if (r < 0)
-	{
+	if (r < 0) {
 		DMERR("Register kprobe failed %d", r);
-		return -1;
+		return r;
 	}
 
 	r = dm_register_target(&eraser_target);
-	if (r < 0)
+	if (r < 0) {
 		DMERR("dm_register failed %d", r);
+		return r;
+	}
 
-	if (!proc_create(HOLEPUNCH_PROC_FILE, 0, NULL, &eraser_fops))
-	{
+	if (!proc_create(HOLEPUNCH_PROC_FILE, 0, NULL, &eraser_fops)) {
 		DMERR("Cannot create proc file.");
 		return -ENOMEM;
 	}
@@ -2178,7 +2166,7 @@ static void __exit dm_eraser_exit(void)
 	dm_unregister_target(&eraser_target);
 	unregister_kprobe(&eraser_unlink_kprobe);
 	netlink_kernel_release(eraser_sock);
-	DMCRIT("HOLEPUNCH unloaded.");
+	DMINFO("HOLEPUNCH unloaded.");
 }
 
 module_init(dm_eraser_init);
