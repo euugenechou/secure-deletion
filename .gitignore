@@ -15,5 +15,5 @@
 
 *.sh
 
-holepunch/eraser-userland/build
-eraser/eraser-userland/build
+holepunch/holepunch-userland/build/**
+eraser/eraser-userland/build/**
