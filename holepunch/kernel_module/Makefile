@@ -20,7 +20,7 @@ endif
 
 
 all:
-	make -C $(LINUXROOT) M=$(PWD) modules ccflags-y="$(ccflags-y)" V=1
+	make -C $(LINUXROOT) M=$(PWD) modules ccflags-y="$(ccflags-y)"
 
 debug: ccflags-y += -DHOLEPUNCH_DEBUG
 debug: all
