@@ -78,7 +78,6 @@ typedef uint64_t u64;
 u64 div_ceil(u64, u64);
 
 /* Get random data. */
-int eraser_random;
 void get_random_data(char *, unsigned);
 void init_random();
 void cleanup_random();

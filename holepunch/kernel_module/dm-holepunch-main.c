@@ -1313,9 +1313,9 @@ static int holepunch_persist_unlink(struct eraser_dev *rd,
 	old_tag = fktsector->tag;
 
 	fktsector->tag = rd->hp_h->tag_counter++;
-// #ifdef HOLEPUNCH_DEBUG
-// 	KWORKERMSG("Tag: %llu -> %llu\n", old_tag, fktsector->tag);
-// #endif
+#ifdef HOLEPUNCH_DEBUG
+	KWORKERMSG("Tag: %llu -> %llu\n", old_tag, fktsector->tag);
+#endif
 	holepunch_puncture_at_tag(rd, old_tag, &punctured_keynode_index,
 		&new_keynode_start_index, &new_keynode_end_index);
 
@@ -1327,7 +1327,7 @@ static int holepunch_persist_unlink(struct eraser_dev *rd,
 		holepunch_get_pprf_keynode_sector_for_keynode_index(rd, new_keynode_end_index-1);
 
 #ifdef HOLEPUNCH_DEBUG
-	KWORKERMSG("Keylength: %u/%u, limit:%u\n", rd->pprf_fkt[0].master_key_count,
+	KWORKERMSG("Keylength: %u/%u, limit:%u\n", rd->hp_h->master_key_count,
 		rd->pprf_master_key_capacity, rd->hp_h->master_key_limit);
 	KWORKERMSG("PPRF keynode indices touched: %u %u %u\n",
 		punctured_keynode_index, new_keynode_start_index, new_keynode_end_index);

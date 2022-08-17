@@ -46,8 +46,8 @@
 #define HOLEPUNCH_PROC_FILE "/proc/holepunchtab"
 
 #define PRG_INPUT_LEN 32
-unsigned char HOLEPUNCH_PPRF_DEPTH;
-#define HOLEPUNCH_KEY_GROWTH       (2*HOLEPUNCH_PPRF_DEPTH)
+// The key growth is the PPRF depth times this value
+#define HOLEPUNCH_KEY_GROWTH_MULT  2
 #define HOLEPUNCH_REFRESH_INTERVAL 10000
 
 #define ERASER_CREATE 0

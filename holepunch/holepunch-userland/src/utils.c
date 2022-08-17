@@ -23,6 +23,8 @@
 
 #include "utils.h"
 
+static int eraser_random;
+
 /* Div up */
 u64 div_ceil(u64 n, u64 d) {
     return (n + d - 1) /  d;

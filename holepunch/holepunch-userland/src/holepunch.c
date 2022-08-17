@@ -482,23 +482,23 @@ void do_create(char *dev_path, int nv_index) {
     // hp_buf = malloc(ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
     // memset(hp_buf, 0, ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
     hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
+    u64 key_table_len = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
+    // XXX how is this calculated? it feels a little arbitrary
+    hp_h->pprf_depth = 32 - __builtin_clz(key_table_len + HOLEPUNCH_REFRESH_INTERVAL);
+    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH_MULT * hp_h->pprf_depth;
+    u64 pprf_key_len = div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
 
     hp_h->initialized = 0;
     hp_h->key_table_start = ERASER_HEADER_LEN;
-    hp_h->pprf_fkt_start = hp_h->key_table_start + div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
-    hp_h->pprf_fkt_bottom_width = div_ceil(hp_h->pprf_fkt_start - hp_h->key_table_start,
-        HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
+    hp_h->pprf_fkt_start = hp_h->key_table_start + key_table_len;
+    hp_h->pprf_fkt_bottom_width = div_ceil(pprf_key_len, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
     hp_h->pprf_fkt_top_width = div_ceil(hp_h->pprf_fkt_bottom_width, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
     hp_h->pprf_key_start = hp_h->pprf_fkt_start + hp_h->pprf_fkt_bottom_width + hp_h->pprf_fkt_top_width;
-    hp_h->data_start = hp_h->pprf_key_start +
-        div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
+    hp_h->data_start = hp_h->pprf_key_start + pprf_key_len;
     hp_h->data_end = dev_size / ERASER_SECTOR_LEN;
-    hp_h->pprf_depth =  32 - __builtin_clz(hp_h->pprf_fkt_start
-        - hp_h->key_table_start + HOLEPUNCH_REFRESH_INTERVAL);
 // #ifdef ERASER_DEBUG
     print_green("-> Holepunch PPRF depth: %u\n\n", hp_h->pprf_depth);
 // #endif
-    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH;
 
 #ifdef ERASER_DEBUG
     print_green("Key table start: %llu\n", hp_h->key_table_start);
