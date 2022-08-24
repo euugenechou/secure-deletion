@@ -35,7 +35,7 @@ u64 div_ceil(u64 n, u64 d) {
  */
 
 /* Fill a buffer with random bytes. */
-void get_random_data(char *data, unsigned len) {
+void get_random_data(void *data, unsigned len) {
 
     ssize_t r;
 
@@ -135,19 +135,19 @@ unsigned char *hex_encode(unsigned char *in, unsigned len) {
 /*
  * Disk I/O helpers.
  */
-void write_sectors(int fd, char *data, unsigned count) {
-    if (write(fd, data, count * ERASER_SECTOR_LEN) == -1) {
+void write_sectors(int fd, void *data, unsigned count) {
+    if (write(fd, data, count * ERASER_SECTOR) == -1) {
         die("Error writing to device.\n");
     }
 }
 
-void read_sectors(int fd, char *data, unsigned count) {
-    if (read(fd, data, count * ERASER_SECTOR_LEN) == -1) {
+void read_sectors(int fd, void *data, unsigned count) {
+    if (read(fd, data, count * ERASER_SECTOR) == -1) {
         die("Error reading from device.\n");
     }
 }
 
-void write_bytes(int fd, char *data, unsigned count) {
+void write_bytes(int fd, void *data, unsigned count) {
     if (write(fd, data, count) == -1) {
         die("Error writing to device.\n");
     }

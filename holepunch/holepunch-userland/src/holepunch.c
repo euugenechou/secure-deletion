@@ -156,39 +156,6 @@ void cleanup_keys() {
     }
 }
 
-
-void do_init_filekeys(int fd, struct holepunch_header *hp_h, u64 inode_count) {
-    struct holepunch_filekey_sector *filekey_table;
-    struct holepunch_key *entries;
-    unsigned sec_num, sectors;
-    u32 ino_num;
-
-    sectors = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
-    filekey_table = malloc(ERASER_SECTOR * sectors);
-    
-    for (sec_num = 0; sec_num < sectors; ++sec_num) {
-        filekey_table[sec_num].tag = sec_num;
-        entries = filekey_table[sec_num].entries;
-        for (ino_num = 0; ino_num < HOLEPUNCH_FILEKEYS_PER_SECTOR; ++ino_num) {
-#ifdef ERASER_DEBUG
-            memset(entries[ino_num].key, 0xbc, ERASER_KEY_LEN);
-#else
-            get_random_data(entries[ino_num].key, ERASER_KEY_LEN);
-#endif
-        }
-    }
-    write_sectors(fd,  (char *) filekey_table, hp_h->pprf_fkt_start - hp_h->key_table_start);
-    free(filekey_table);
-
-#ifdef ERASER_DEBUG
-    print_green("%u inodes initialized\n", inode_count);
-#endif
-}
-
-
-
-
-
 /*
  * Actual commands.
  */
@@ -293,7 +260,7 @@ void do_close(char *eraser_name) {
 
 /* Device mapper open. */
 int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, char *mapped_dev_path, int netlink_pid) {
-    
+
     struct dm_task *dmt;
     u32 cookie = 0;
     u16 udev_flags = 0;
@@ -323,7 +290,7 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
         goto out;
     }
 
-    if (!dm_task_add_target(dmt, 0, len * (ERASER_SECTOR_LEN / 512), ERASER_TARGET, param)) {
+    if (!dm_task_add_target(dmt, 0, len * (ERASER_SECTOR / 512), ERASER_TARGET, param)) {
         goto out;
     }
 
@@ -377,7 +344,7 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     }
 
     /* Read header. */
-    buf = malloc(ERASER_HEADER_LEN * ERASER_SECTOR_LEN);
+    buf = malloc(ERASER_HEADER_LEN * ERASER_SECTOR);
     read_sectors(fd, buf, ERASER_HEADER_LEN);
     hp_h = (struct holepunch_header *) buf;
 
@@ -411,10 +378,11 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     }
 
     #ifdef ERASER_DEBUG
+        print_green("Journal start: %llu\n", hp_h->journal_start);
         print_green("Key table start: %llu\n", hp_h->key_table_start);
-        print_green("PPRF fkt start: %llu\n", hp_h->pprf_fkt_start);
-        print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
-        print_green("PPRF key max elts: %llu\n", hp_h->master_key_limit);
+        print_green("PPRF fkt start: %llu\n", hp_h->fkt_start);
+        print_green("PPRF key start: %llu\n", hp_h->pprf_start);
+        print_green("PPRF key max elts: %llu\n", hp_h->pprf_capacity);
         print_green("Data start: %llu\n", hp_h->data_start);
         print_green("Data end: %llu\n", hp_h->data_end);
     #endif
@@ -470,41 +438,37 @@ void do_create(char *dev_path, int nv_index) {
 
 #ifdef ERASER_DEBUG
     print_green("Device size is %llu bytes\n", dev_size);
-    print_green("-> ERASER sectors: %llu\n", dev_size / ERASER_SECTOR_LEN);
+    print_green("-> ERASER sectors: %llu\n", dev_size / ERASER_SECTOR);
     print_green("-> Expecting %llu inodes for an ext4 partition\n\n", inode_count);
 #endif
     /* Compute sizes for holepunch metadata */
-
-    /* The key table should have inode_num number of entries */
-    // char *hp_buf;
-    struct holepunch_header *hp_h;
-
-    // hp_buf = malloc(ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
-    // memset(hp_buf, 0, ERASER_SECTOR_LEN * ERASER_SECTOR_LEN);
-    hp_h = malloc (ERASER_SECTOR_LEN * ERASER_HEADER_LEN);
-    u64 key_table_len = div_ceil(inode_count, HOLEPUNCH_FILEKEYS_PER_SECTOR);
+    struct holepunch_header *hp_h = malloc(ERASER_SECTOR * ERASER_HEADER_LEN);
+    u64 key_table_len = div_ceil(inode_count, HP_KEY_PER_SECTOR);
     // XXX how is this calculated? it feels a little arbitrary
     hp_h->pprf_depth = 32 - __builtin_clz(key_table_len + HOLEPUNCH_REFRESH_INTERVAL);
-    hp_h->master_key_limit = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH_MULT * hp_h->pprf_depth;
-    u64 pprf_key_len = div_ceil(hp_h->master_key_limit, HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR);
+    hp_h->pprf_capacity = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH_MULT * hp_h->pprf_depth;
+    u64 pprf_len = div_ceil(hp_h->pprf_capacity, HP_PPRF_PER_SECTOR);
 
-    hp_h->initialized = 0;
-    hp_h->key_table_start = ERASER_HEADER_LEN;
-    hp_h->pprf_fkt_start = hp_h->key_table_start + key_table_len;
-    hp_h->pprf_fkt_bottom_width = div_ceil(pprf_key_len, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
-    hp_h->pprf_fkt_top_width = div_ceil(hp_h->pprf_fkt_bottom_width, HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR);
-    hp_h->pprf_key_start = hp_h->pprf_fkt_start + hp_h->pprf_fkt_bottom_width + hp_h->pprf_fkt_top_width;
-    hp_h->data_start = hp_h->pprf_key_start + pprf_key_len;
-    hp_h->data_end = dev_size / ERASER_SECTOR_LEN;
+    hp_h->journal_start = ERASER_HEADER_LEN;
+    hp_h->key_table_start = hp_h->journal_start + HP_JOURNAL_LEN;
+    hp_h->fkt_start = hp_h->key_table_start + key_table_len;
+    hp_h->fkt_bottom_width = div_ceil(pprf_len, HP_FKT_PER_SECTOR);
+    hp_h->fkt_top_width = div_ceil(hp_h->fkt_bottom_width, HP_FKT_PER_SECTOR);
+    hp_h->pprf_start = hp_h->fkt_start + hp_h->fkt_bottom_width + hp_h->fkt_top_width;
+    hp_h->data_start = hp_h->pprf_start + pprf_len;
+    hp_h->data_end = dev_size / ERASER_SECTOR;
+    hp_h->pprf_size = 1;
+    hp_h->in_use = 0;
 // #ifdef ERASER_DEBUG
     print_green("-> Holepunch PPRF depth: %u\n\n", hp_h->pprf_depth);
 // #endif
 
 #ifdef ERASER_DEBUG
+    print_green("Journal start: %llu\n", hp_h->journal_start);
     print_green("Key table start: %llu\n", hp_h->key_table_start);
-    print_green("PPRF fkt start: %llu\n", hp_h->pprf_fkt_start);
-    print_green("PPRF key start: %llu\n", hp_h->pprf_key_start);
-    print_green("PPRF key max elts: %llu\n", hp_h->master_key_limit);
+    print_green("PPRF fkt start: %llu\n", hp_h->fkt_start);
+    print_green("PPRF key start: %llu\n", hp_h->pprf_start);
+    print_green("PPRF key max elts: %llu\n", hp_h->pprf_capacity);
     print_green("Data start: %llu\n", hp_h->data_start);
     print_green("Data end: %llu\n", hp_h->data_end);
 #endif
@@ -524,17 +488,25 @@ void do_create(char *dev_path, int nv_index) {
     }
     memset(master_key, 0, ERASER_KEY_LEN);
 
-    /* Write the header. */
-    write_sectors(fd, (char *) hp_h, ERASER_HEADER_LEN);
-    do_init_filekeys(fd, hp_h, inode_count);
-    
-    // We defer initializing the PPRF and PPRF fkt to the kernel module
+    /* Write the header, then a journal entry for PPRF init. */
+    write_sectors(fd, hp_h, ERASER_HEADER_LEN);
+    u64 *journal_ctl = malloc(ERASER_SECTOR);
+    journal_ctl[0] = HPJ_PPRF_INIT;
+    get_random_data(journal_ctl + 1, ERASER_KEY_LEN);
+    write_sectors(fd, journal_ctl, 1);
+    /* Randomize the rest of the journal and all of the key table. */
+    for (u64 i = 1; i < HP_JOURNAL_LEN + key_table_len; ++i) {
+        /* Done one sector at a time so as not to overwhelm /dev/urandom. */
+        get_random_data(journal_ctl, ERASER_SECTOR);
+        write_sectors(fd, journal_ctl, 1);
+    }
+    free(journal_ctl);
+    /* The journal entry will take care of the rest. */
 
     /* All done. */
     sync();
     print_green("\nDone!\n\n");
 
-    // free(hp_buf);
     free(hp_h);
 tpm_error:
     cleanup_nvram(nvram);

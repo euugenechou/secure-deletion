@@ -99,8 +99,8 @@ struct arguments arguments;
 
 int main(int argc, char **argv) {
 
-    assert(sizeof(struct eraser_header) < ERASER_SECTOR_LEN);
-    assert((ERASER_SECTOR_LEN % sizeof(struct eraser_map_entry)) == 0);
+    assert(sizeof(struct eraser_header) < ERASER_SECTOR);
+    assert((ERASER_SECTOR % sizeof(struct eraser_map_entry)) == 0);
 
     signal(SIGINT, handle_signal);
 

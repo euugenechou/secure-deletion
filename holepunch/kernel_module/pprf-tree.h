@@ -20,13 +20,14 @@ static inline void kernel_random(u8 *data, u64 len)
 
 // This is arbitrary. it can support 2^64 inodes. Currently supporting anything larger would involve some rewriting
 #define MAX_DEPTH 64
+
+#ifdef HOLEPUNCH_DEBUG
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
-
-
 struct node_label {
 	u64 label;
 	u8 depth;
 };
+#endif
 
 /* Binary-tree based organization of the PPRF keys
  * 	
@@ -67,8 +68,6 @@ struct __attribute__((packed)) pprf_keynode {
 #endif
 };
 
-void reset_pprf_keynode(struct pprf_keynode *node);
-
 inline bool check_bit_is_set(u64 tag, u8 index);
 inline void set_bit_in_buf(u64 *tag, u8 index, bool val);
 
@@ -79,14 +78,12 @@ int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_coun
 void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, 
 		unsigned len);
 
-void init_node_label_from_long(struct node_label *lbl, u8 pprf_depth, u64 val);
-
 struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
 		u64 tag, u32 *depth, int *index) ;
 int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-	u32 *master_key_count, u32 *max_master_key_count, u64 tag);
+	u32 *master_key_count, u64 tag);
 int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-	u32 *master_key_count, u32 *max_master_key_count, u64 tag);
+	u32 *master_key_count, u64 tag);
 int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8 *out);
 int evaluate_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8* out);
 

@@ -33,15 +33,15 @@
 #define ERASER_TARGET "eraser"
 #define ERASER_DEV_PATH "/dev/mapper/"
 
-#define ERASER_HEADER_LEN 1     /* In sectors. */
-#define ERASER_HEADER_LEN 1     /* In sectors. */
-#define ERASER_KEY_LEN 32       /* In bytes. */
-#define ERASER_IV_LEN 16        /* In bytes. */
-
-#define ERASER_SALT_LEN 32
-#define ERASER_DIGEST_LEN 32
-
-#define ERASER_NAME_LEN 16
+#define ERASER_SECTOR 4096   /* In bytes. */
+#define ERASER_HEADER_LEN 1  /* In blocks. */
+#define ERASER_KEY_LEN 32    /* In bytes. */
+#define ERASER_IV_LEN 16     /* In bytes. */
+#define ERASER_SALT_LEN 32   /* In bytes. */
+#define ERASER_DIGEST_LEN 32 /* In bytes. */
+#define ERASER_NAME_LEN 16   /* ERASER instance name. */
+/* 64 should be large enough for most purposes and may in fact be too large. */
+#define HP_JOURNAL_LEN 64    /* In blocks. */
 
 #define HOLEPUNCH_PROC_FILE "/proc/holepunchtab"
 
@@ -53,17 +53,18 @@
 #define ERASER_CREATE 0
 #define ERASER_OPEN 1
 
-#define ERASER_SECTOR 4096   /* In bytes. */
 /* These are just the default values for ext4. Good enough, for now. */
 #define ERASER_BYTES_PER_INODE_RATIO 16384
 
 
-#define MAX_DEPTH 64 
+#define MAX_DEPTH 64
+#ifdef ERASER_DEBUG
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 struct node_label {
     u64 label;
-    unsigned char depth;
+    u8 depth;
 };
+#endif
 
 struct __attribute__((packed)) pprf_keynode {
     union {
@@ -74,7 +75,7 @@ struct __attribute__((packed)) pprf_keynode {
         char key[PRG_INPUT_LEN];
     } v;
     char flag;
-#ifdef DEBUG
+#ifdef ERASER_DEBUG
     struct node_label lbl;
 #endif
 };
@@ -113,47 +114,59 @@ struct holepunch_header {
     u8 iv_key[ERASER_KEY_LEN];
 
     /* All in ERASER sectors, strictly consecutive; header starts at zero. */
+    u64 journal_start;
     u64 key_table_start;
-    u64 pprf_fkt_start;
-    u64 pprf_key_start;
+    u64 fkt_start;
+    u64 pprf_start;
     u64 data_start;
     u64 data_end; /* One past the last accesible data sector. */
 
-    u32 master_key_count; // how many individual keys make up the master key
+    /* We use a two-level FKT; number of sectors in each level. */
+    u64 fkt_top_width;
+    u64 fkt_bottom_width;
+
+    /* The maximum number of keynodes we can store on disk. */
+    u32 pprf_capacity;
+
+    /* The current number of keynodes in the PPRF key. */
+    u32 pprf_size;
     u64 tag_counter;
 
-    u32 pprf_fkt_top_width;
-    u32 pprf_fkt_bottom_width;
-
-    u32 master_key_limit;
+    /* The maximum PPRF depth. */
     u8 pprf_depth;
-
-    u8 initialized;
+    u8 in_use;
 };
 
 struct holepunch_key {
     u8 key[ERASER_KEY_LEN];
 };
 
-#define HOLEPUNCH_FILEKEYS_PER_SECTOR ((ERASER_SECTOR - 32)/ERASER_KEY_LEN)
-#define HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR \
-        (ERASER_SECTOR/sizeof(struct pprf_keynode))
-#define HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR (ERASER_SECTOR/ERASER_KEY_LEN)
+/* Journal constants; only HPJ_PPRF_INIT needed, but whatever. */
+
+#define HPJ_NONE 0UL
+#define HPJ_MASTER_ROT 1UL
+#define HPJ_PPRF_ROT 2UL
+#define HPJ_PPRF_INIT 3UL
+#define HPJ_GENERIC 4UL
+
+#define HP_KEY_PER_SECTOR ((ERASER_SECTOR - 32)/ERASER_KEY_LEN)
+#define HP_PPRF_PER_SECTOR (ERASER_SECTOR/sizeof(struct pprf_keynode))
+#define HP_FKT_PER_SECTOR (ERASER_SECTOR/ERASER_KEY_LEN)
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_filekey_sector {
     u64 tag;
     u64 magic1;
     u64 magic2;
     u64 magic3;
-    struct holepunch_key entries[HOLEPUNCH_FILEKEYS_PER_SECTOR];
+    struct holepunch_key entries[HP_KEY_PER_SECTOR];
 };
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_keynode_sector {
-    struct pprf_keynode entries[HOLEPUNCH_PPRF_KEYNODES_PER_SECTOR];
+    struct pprf_keynode entries[HP_PPRF_PER_SECTOR];
 };
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
-    struct holepunch_key entries[HOLEPUNCH_PPRF_FKT_ENTRIES_PER_SECTOR];
+    struct holepunch_key entries[HP_FKT_PER_SECTOR];
 };
 
 

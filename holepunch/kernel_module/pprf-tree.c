@@ -10,10 +10,6 @@
 #include <linux/timekeeping.h>
 #endif
 
-void reset_pprf_keynode(struct pprf_keynode *node) {
-	memset(node, 0, sizeof(struct pprf_keynode));
-}
-
 inline bool check_bit_is_set(u64 tag, u8 depth) 
 {
 	return tag & (1ull << (63-depth));
@@ -40,28 +36,6 @@ int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count
 	return (*master_key != NULL);
 }
 
-
-int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned factor) 
-{
-	struct pprf_keynode *tmp;
-#ifdef HOLEPUNCH_DEBUG
-	printk("RESIZING: current capacity = %u\n", *max_master_key_count);
-#endif	
-	BUG_ON((*max_master_key_count)*factor*sizeof(struct pprf_keynode) == 0);
-	tmp = vmalloc((*max_master_key_count)*factor*sizeof(struct pprf_keynode));
-	if (!tmp)
-		return -ENOMEM;
-	memcpy(tmp, *master_key, sizeof(struct pprf_keynode) * (*max_master_key_count));
-	vfree(*master_key);
-	*max_master_key_count *= factor;
-	*master_key = tmp;
-#ifdef HOLEPUNCH_DEBUG
-	printk("RESIZING DONE: final capacity = %u\n", *max_master_key_count);
-#endif	
-
-	return 0;
-}
-
 /* we may need to zero out more than just the master key because of things
  * like page-granularity writes
  */
@@ -74,24 +48,19 @@ void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, uns
 	master_key->flag = PPRF_KEYLEAF;
 }
 
-void init_node_label_from_long(struct node_label *lbl, u8 pprf_depth, u64 val) 
-{
-	lbl->depth = pprf_depth;
-	lbl->label = val;
-}
 
 /* Tree traversal
  *
  * Returns ptr to key or NULL if punctured
  * Additionally will write the node index to "index" if not NULL
  * Will initialize depth to 0
- */ 
-struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth, 
+ */
+struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
 		u64 tag, u32 *depth, int *index) 
 {
 	unsigned i;
 	struct pprf_keynode *cur;
-	
+
 	i = 0;
 	*depth = 0;
 	do {
@@ -101,13 +70,13 @@ struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
 		}
 		if (cur->flag == PPRF_KEYLEAF) {
 			return cur;
-		} 
+		}
 		if (cur->flag == PPRF_INTERNAL) {
-			if(check_bit_is_set(tag, *depth)) 
+			if(check_bit_is_set(tag, *depth))
 				i = cur->v.next.ir;
 			else
 				i = cur->v.next.il;
-		} 
+		}
 		++*depth;
 	} while (*depth < pprf_depth);
 
@@ -117,6 +86,40 @@ struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
 	}
 	return NULL;
 }
+/*
+New, but probably best to try things out a bit more in stages....
+struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
+		u64 tag, u32 *depth, int *index)
+{
+	struct pprf_keynode *cur = pprf_base;
+	for (*depth = 0; *depth <= pprf_depth; ++*depth) {
+		switch (cur->flag) {
+			case PPRF_KEYLEAF:
+				if (index)
+					*index = cur - pprf_base;
+				return cur;
+			case PPRF_INTERNAL:
+				/*
+				 * Not sure why this was done, but I'm just replicating the old
+				 * behavior exactly (except for faster puncture evals)
+				 *//*
+				if (*depth == pprf_depth)
+					/* Theoretically, I guess this should never occur *//*
+					return NULL;
+				if (check_bit_is_set(tag, *depth))
+					cur = pprf_base + cur->v.next.ir;
+				else
+					cur = pprf_base + cur->v.next.il;
+				break;
+			case PPRF_PUNCTURE:
+				return NULL;
+			default:
+				/* This should never happen! *//*
+				return NULL;
+		}
+	}
+	return NULL;
+}*/
 
 /* PPRF puncture operation
  * 
@@ -126,7 +129,7 @@ struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
  * as a result of the puncture (used for writeback purposes).
  */
 int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-	u32 *master_key_count, u32 *max_master_key_count, u64 tag) {
+	u32 *master_key_count, u64 tag) {
 	u32 depth;
 	u8 keycpy[PRG_INPUT_LEN];
 	u8 tmp[2*PRG_INPUT_LEN];
@@ -184,10 +187,10 @@ int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
 }
 
 int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-		u32 *master_key_count, u32 *max_master_key_count, u64 tag)
+		u32 *master_key_count, u64 tag)
 {
 	tag <<= (64-pprf_depth);
-	return puncture(pprf_base, pprf_depth, p, data, master_key_count, max_master_key_count, tag);
+	return puncture(pprf_base, pprf_depth, p, data, master_key_count, tag);
 }
 
 
@@ -432,9 +435,9 @@ void run_tests(void) {
 	base = NULL;
 
 	printk(KERN_INFO "\n running test_puncture_0\n");
-	test_puncture_0(&base, &max_count, &count, tfm, iv);	
+	test_puncture_0(&base, &max_count, &count, tfm, iv);
 	printk(KERN_INFO "\n running test_puncture_1\n");
-	test_puncture_1(&base, &max_count, &count, tfm, iv);	
+	test_puncture_1(&base, &max_count, &count, tfm, iv);
 
 	printk(KERN_INFO "\n running test_evaluate_0\n");
 	test_evaluate_0(&base, &max_count, &count, tfm, iv);

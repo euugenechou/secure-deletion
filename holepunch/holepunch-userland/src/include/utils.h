@@ -78,7 +78,7 @@ typedef uint64_t u64;
 u64 div_ceil(u64, u64);
 
 /* Get random data. */
-void get_random_data(char *, unsigned);
+void get_random_data(void *, unsigned);
 void init_random();
 void cleanup_random();
 
@@ -93,10 +93,10 @@ char *read_text_file(char *, unsigned *);
 unsigned char *hex_encode(unsigned char *, unsigned len);
 
 /* Disk write helpers. */
-#define ERASER_SECTOR_LEN 4096   /* In bytes. */
-#define ERASER_IO_SIZE 1        /* In sectors. */
-void write_sectors(int, char *, unsigned);
-void read_sectors(int, char *, unsigned);
-void write_bytes(int, char *, unsigned);
+#define ERASER_SECTOR 4096  /* In bytes. */
+#define ERASER_IO_SIZE 1    /* In sectors. */
+void write_sectors(int, void *, unsigned);
+void read_sectors(int, void *, unsigned);
+void write_bytes(int, void *, unsigned);
 
 #endif /* UTILS_H */
