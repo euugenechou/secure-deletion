@@ -524,32 +524,6 @@ static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag, u32 *punct,
  * Journaling.
  */
 
-/*
- * Queue a write for the current journal transaction (making one if necessary);
- * overwrites writes to the same location. Return status: 0: OK, write necessary;
- * >0: OK, no write needed. <0: error (memory issue or failed to write before)
- */
-static int holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data)
-{
-	struct page *p;
-	int i;
-	if (!rd->journal) {
-		p = eraser_allocate_page(rd);
-		if (!p)
-			return -1;
-		rd->journal = kmap(p);
-		rd->journal[0] = HPJ_GENERIC;
-	}
-	for (i = 1; i < HP_JOURNAL_LEN; ++i) {
-		if (rd->journal[i] == addr || rd->journal[i] == rd->hp_h->journal_start) {
-			rd->journal[i] = addr;
-			eraser_rw_sector(rd->hp_h->journal_start + i, WRITE, data, rd);
-			return HP_JOURNAL_LEN - 1 - i;
-		}
-	}
-	return -1;
-}
-
 /* Replay the journal. */
 static void holepunch_journal_replay(struct eraser_dev *rd)
 {
@@ -568,11 +542,40 @@ static void holepunch_journal_replay(struct eraser_dev *rd)
 static void holepunch_journal_commit(struct eraser_dev *rd)
 {
 	if (!rd->journal) return;
+	if (rd->journal_entry < HP_JOURNAL_LEN)
+		rd->journal[rd->journal_entry] = rd->hp_h->journal_start;
 	eraser_rw_sector(rd->hp_h->journal_start, WRITE, rd->journal, rd);
 	holepunch_journal_replay(rd);
 	rd->journal[0] = HPJ_NONE;
 	eraser_rw_sector(rd->hp_h->journal_start, WRITE, rd->journal, rd);
 	eraser_free_sector(rd->journal, rd);
+}
+
+/*
+ * Queue a write for the current journal transaction (making one if necessary);
+ * overwrites previous writes to the same location. If the journal is full,
+ * commits and starts over; if this behavior isn't desired, use
+ * rd->journal_entry and holepunch_journal_commit manually.
+ */
+static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data)
+{
+	struct page *p;
+	int i;
+	if (rd->journal_entry == HP_JOURNAL_LEN)
+		holepunch_journal_commit(rd);
+	if (!rd->journal) {
+		p = eraser_allocate_page(rd);
+		rd->journal = kmap(p);
+		rd->journal[0] = HPJ_GENERIC;
+		rd->journal_entry = 1;
+	}
+	for (i = 1; i < rd->journal_entry; ++i) {
+		if (rd->journal[i] == addr)
+			break;
+	}
+	rd->journal[i] = addr;
+	eraser_rw_sector(rd->hp_h->journal_start + i, WRITE, data, rd);
+	rd->journal_entry++;
 }
 
 static void holepunch_tpm_set_master(struct eraser_dev *rd, u8 *new_key);
@@ -744,13 +747,15 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 
 /*
  * Drops all cache entries, writing them back to disk if dirty. Takes each
- * bucket lock in turn.
+ * bucket lock in turn, in addition to the PPRF lock (read or write depending
+ * on puncture).
  */
 static void eraser_force_evict_map_cache(struct eraser_dev *rd, int puncture)
 {
 	struct eraser_map_cache *c;
 	struct eraser_map_cache *n;
 	int i;
+	u8 key[ERASER_KEY_LEN];
 
 	for (i = 0; i < ERASER_MAP_CACHE_BUCKETS; ++i) {
 		down(&rd->cache_lock[i]);
@@ -759,10 +764,13 @@ static void eraser_force_evict_map_cache(struct eraser_dev *rd, int puncture)
 				if (puncture) {
 					holepunch_persist_unlink(rd, c, &rd->cache_lock[i]);
 				} else {
-					/* Just ignore errors for now (maybe there's a better way) */
-					if (!holepunch_journal_write(rd, c->sector, c->map)) {
-						holepunch_journal_commit(rd);
-					}
+					HP_DOWN_READ(&rd->pprf_sem, "evict cache");
+					holepunch_evaluate_at_tag(rd, *(u64 *)c->map, key,
+						rd->pprf_key);
+					HP_UP_READ(&rd->pprf_sem, "evict cache");
+					holepunch_cbc_filekey_sector(rd, c->map, c->map,
+						ERASER_ENCRYPT, key, c->sector);
+					eraser_rw_sector(c->sector, WRITE, c->map, rd);
 				}
 			}
 			eraser_drop_map_cache(rd, c);
@@ -845,9 +853,9 @@ static int holepunch_evict_map_cache(void *data)
 	unsigned long last_dirty_timeout;
 
 	while (1) {
-#ifdef HOLEPUNCH_DEBUG
-		KWORKERMSG("The reaper has awoken\n");
-#endif
+// #ifdef HOLEPUNCH_DEBUG
+// 		KWORKERMSG("The reaper has awoken\n");
+// #endif
 		/* first_access_timeout = jiffies - ERASER_CACHE_EXP_FIRST_ACCESS; */
 		last_access_timeout = jiffies - ERASER_CACHE_EXP_LAST_ACCESS;
 		last_dirty_timeout = jiffies - ERASER_CACHE_EXP_LAST_DIRTY;
@@ -877,12 +885,12 @@ static int holepunch_evict_map_cache(void *data)
 			up(&rd->cache_lock[i]);
 		}
 
-#ifdef HOLEPUNCH_DEBUG
-		down_read(&rd->map_cache_count_sem);
-		KWORKERMSG("The reaper shall return for another bounty... (Cached: %llu)\n", 
-			rd->map_cache_count);
-		up_read(&rd->map_cache_count_sem);
-#endif
+// #ifdef HOLEPUNCH_DEBUG
+// 		down_read(&rd->map_cache_count_sem);
+// 		KWORKERMSG("The reaper shall return for another bounty... (Cached: %llu)\n",
+// 			rd->map_cache_count);
+// 		up_read(&rd->map_cache_count_sem);
+// #endif
 		msleep_interruptible(ERASER_CACHE_EVICTION_PERIOD * 1000);
 
 		/*
@@ -890,9 +898,9 @@ static int holepunch_evict_map_cache(void *data)
 		 * eviction strategies should be studied for optimal performance.
 		 */
 		if (kthread_should_stop()) {
-#ifdef HOLEPUNCH_DEBUG
-			KWORKERMSG("The reaper bids farewell\n");
-#endif
+// #ifdef HOLEPUNCH_DEBUG
+// 			KWORKERMSG("The reaper bids farewell\n");
+// #endif
 			return 0;
 		}
 
@@ -1162,19 +1170,19 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	struct page *p;
 	void *map;
 
-	HP_DOWN_WRITE(&rd->pprf_sem, "PPRF: persist unlink");
-
 	/* If we refresh the PPRF, then we don't need to puncture again afterwards */
 	if (rd->hp_h->pprf_size + 2*rd->hp_h->pprf_depth > rd->hp_h->pprf_capacity) {
-		++rd->stats_refresh;
 		HP_UP(cache_lock, "PPRF: persist -> refresh");
-		eraser_force_evict_map_cache(rd, false);
+		eraser_force_evict_map_cache(rd, 0);
+		HP_DOWN_WRITE(&rd->pprf_sem, "PPRF: persist -> refresh");
+		++rd->stats_refresh;
 		holepunch_rotate_pprf(rd);
 		HP_UP_WRITE(&rd->pprf_sem, "PPRF: persist -> refresh");
 		HP_DOWN(cache_lock, "PPRF: reacquire");
 		return;
 	}
 
+	HP_DOWN_WRITE(&rd->pprf_sem, "PPRF: persist unlink");
 	/* proceed with puncturing */
 	old_tag = c->map->tag;
 	c->map->tag = rd->hp_h->tag_counter++;
@@ -1715,6 +1723,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	holepunch_read_pprf(rd);
 
 	/* Journal recovery, if necessary. */
+	rd->journal_entry = 0;
 	rd->journal = eraser_rw_sector(rd->hp_h->journal_start, READ, NULL, rd);
 	switch (rd->journal[0]) {
 		case HPJ_NONE:
@@ -1863,7 +1872,8 @@ static void eraser_dtr(struct dm_target *ti)
 	/* Stop auto eviction and write back cached maps. */
 	kthread_stop(rd->evict_map_cache_thread);
 
-	eraser_force_evict_map_cache(rd, true);
+	DMINFO("evict cache");
+	eraser_force_evict_map_cache(rd, 1);
 
 	/* Keys no longer needed, wipe them. */
 	eraser_kill_helper(rd);
@@ -1872,6 +1882,7 @@ static void eraser_dtr(struct dm_target *ti)
 	memset(rd->sec_key, 0, ERASER_KEY_LEN);
 	memset(rd->iv_key, 0, ERASER_KEY_LEN);
 
+	DMINFO("write header");
 	/* Write header. */
 	holepunch_write_header(rd);
 	eraser_free_sector(rd->hp_h, rd);

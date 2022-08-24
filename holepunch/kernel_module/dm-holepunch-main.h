@@ -294,6 +294,7 @@ struct eraser_dev {
 	unsigned long master_key_status;   /* Key status flags. */
 	int helper_pid;                    /* Netlink talks to this pid. */
 	u64 *journal;
+	int journal_entry;
 
 	struct holepunch_header *hp_h;
 	/* Some convenience lengths, calculated from the header. */

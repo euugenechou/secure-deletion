@@ -420,7 +420,7 @@ void do_create(char *dev_path, int nv_index) {
     unsigned char master_key[ERASER_KEY_LEN];
     u64 dev_size;
     u64 inode_count;
-    int fd;
+    int fd, i;
 
     /* Open device. */
     if ((fd = open(dev_path, O_RDWR)) == -1) {
@@ -496,7 +496,7 @@ void do_create(char *dev_path, int nv_index) {
     get_random_data(journal_ctl + 1, ERASER_KEY_LEN);
     write_sectors(fd, journal_ctl, 1);
     /* Randomize the rest of the journal and all of the key table. */
-    for (u64 i = 1; i < HP_JOURNAL_LEN + key_table_len; ++i) {
+    for (i = 1; i < HP_JOURNAL_LEN + key_table_len; ++i) {
         /* Done one sector at a time so as not to overwhelm /dev/urandom. */
         get_random_data(journal_ctl, ERASER_SECTOR);
         write_sectors(fd, journal_ctl, 1);
