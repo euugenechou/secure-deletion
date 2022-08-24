@@ -473,8 +473,9 @@ void do_create(char *dev_path, int nv_index) {
     print_green("Data end: %llu\n", hp_h->data_end);
 #endif
 
-    /* Prompt user for password. */
+    /* Prompt user for password and randomize the IV key. */
     hp_get_keys(ERASER_CREATE, hp_h);
+    get_random_data(hp_h->iv_key, ERASER_KEY_LEN);
 
     /* Define the NVRAM region on TPM. */
     tpm = setup_tpm(tpm_owner_pass);

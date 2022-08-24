@@ -264,6 +264,7 @@ static void __holepunch_blkcipher(void *dst, void *src, u64 len, int op,
 	struct scatterlist sg_src;
 	struct scatterlist sg_dst;
 	struct blkcipher_desc d;
+	int r;
 
 	sg_init_one(&sg_src, src, len);
 	sg_init_one(&sg_dst, dst, len);
@@ -272,11 +273,13 @@ static void __holepunch_blkcipher(void *dst, void *src, u64 len, int op,
 	d.flags = 0;
 
 	if (op == ERASER_ENCRYPT) {
-		if (crypto_blkcipher_encrypt(&d, &sg_dst, &sg_src, len))
-			DMERR("Error encrypting");
+		r = crypto_blkcipher_encrypt(&d, &sg_dst, &sg_src, len);
+		if (r)
+			DMERR("Error encrypting: %d", r);
 	} else if (op == ERASER_DECRYPT) {
-		if (crypto_blkcipher_decrypt(&d, &sg_dst, &sg_src, len))
-			DMERR("Error decrypting");
+		r = crypto_blkcipher_decrypt(&d, &sg_dst, &sg_src, len);
+		if (r)
+			DMERR("Error decrypting: %d", r);
 	} else {
 		DMERR("Invalid crypto operation");
 	}
@@ -334,7 +337,7 @@ static void holepunch_cbc_filekey_sector(struct eraser_dev *rd, void *dst,
 	u8 iv[ERASER_IV_LEN] = {0};
 	holepunch_gen_iv(rd, iv, sectorno);
 	/* Exclude the tag, but include the magic bytes. */
-	holepunch_cbc(rd, dst + 8, src + 8, ERASER_SECTOR - 8, op, key, iv);
+	holepunch_cbc(rd, dst + 16, src + 16, ERASER_SECTOR - 16, op, key, iv);
 }
 
 /*
@@ -637,7 +640,7 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 		holepunch_cbc_filekey_sector(rd, plain, cipher, ERASER_DECRYPT, key, s);
 		eraser_free_sector(cipher, rd);
 		if (unlikely(ignore_magic || plain->magic1 != HP_MAGIC1
-			|| plain->magic2 != HP_MAGIC2 || plain->magic3 != HP_MAGIC3))
+			|| plain->magic2 != HP_MAGIC2))
 			break;
 	}
 	/* Then switch to old and overwrite via new. */
@@ -647,20 +650,22 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 		holepunch_cbc_filekey_sector(rd, plain, cipher, ERASER_DECRYPT, key, s);
 		plain->tag = s - rd->hp_h->key_table_start;
 		if (unlikely(ignore_magic || plain->magic1 != HP_MAGIC1
-			|| plain->magic2 != HP_MAGIC2 || plain->magic3 != HP_MAGIC3)) {
+			|| plain->magic2 != HP_MAGIC2)) {
 			if (unlikely(!ignore_magic))
 				DMWARN("Bad magic bytes found and reset; inodes %llu-%llu may experience data loss",
 					(s - rd->hp_h->key_table_start) * HP_KEY_PER_SECTOR,
 					(s + 1 - rd->hp_h->key_table_start) * HP_KEY_PER_SECTOR - 1);
 			plain->magic1 = HP_MAGIC1;
 			plain->magic2 = HP_MAGIC2;
-			plain->magic3 = HP_MAGIC3;
 		}
 		holepunch_evaluate_at_tag(rd, plain->tag, key, &new);
 		holepunch_cbc_filekey_sector(rd, cipher, plain, ERASER_ENCRYPT, key, s);
 		eraser_rw_sector(s, WRITE, cipher, rd);
 		eraser_free_sector(cipher, rd);
 	}
+#ifdef HOLEPUNCH_DEBUG
+	DMINFO("Done with key transition, moving to FKT.");
+#endif
 	/* Setup AES-CTR instance, then reset FKT. */
 	kernel_random(key, ERASER_KEY_LEN);
 	crypto_blkcipher_setkey(rd->ctr_tfm, key, ERASER_KEY_LEN);
@@ -1089,6 +1094,7 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio)
  */
 
 /* These first three actually journal rather than writing directly. */
+/* Needs PPRF read lock held. */
 static void holepunch_write_key_table_sector(struct eraser_dev *rd,
 		struct holepunch_filekey_sector *sector, u64 index)
 {
@@ -1099,9 +1105,7 @@ static void holepunch_write_key_table_sector(struct eraser_dev *rd,
 
 	p = eraser_allocate_page(rd);
 	data = kmap(p);
-	HP_DOWN_READ(&rd->pprf_sem, "PPRF: write sector");
 	holepunch_evaluate_at_tag(rd, sector->tag, key, rd->pprf_key);
-	HP_UP_READ(&rd->pprf_sem, "PPRF: write sector");
 	holepunch_cbc_filekey_sector(rd, data, sector, ERASER_ENCRYPT, key, sectorno);
 	holepunch_journal_write(rd, sectorno, data);
 	kunmap(p);
@@ -1128,7 +1132,7 @@ static void holepunch_write_fkt_bottom_sector(struct eraser_dev *rd,
 	holepunch_journal_write(rd, sectorno, map);
 }
 
-static int holepunch_write_pprf_key_sector(struct eraser_dev *rd, u64 index,
+static void holepunch_write_pprf_key_sector(struct eraser_dev *rd, u64 index,
 	char *map, bool fkt_refresh)
 {
 	u8 *key;
@@ -1140,7 +1144,6 @@ static int holepunch_write_pprf_key_sector(struct eraser_dev *rd, u64 index,
 	holepunch_cbc_sector(rd, map, rd->pprf_key + index * HP_PPRF_PER_SECTOR,
 		ERASER_ENCRYPT, key, rd->hp_h->pprf_start + index);
 	holepunch_journal_write(rd, rd->hp_h->pprf_start + index, map);
-	return 0;
 }
 
 /*
@@ -1205,11 +1208,11 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	kunmap(p);
 	eraser_free_page(p, rd);
 	holepunch_write_key_table_sector(rd, c->map, c->sector);
+	c->status = 0;
 	holepunch_journal_write(rd, 0, rd->hp_h);
 	holepunch_journal_commit(rd);
 	HP_UP_WRITE(&rd->pprf_sem, "PPRF: persist unlink");
-
-	c->status = 0;
+	holepunch_rotate_master(rd);
 #ifdef HOLEPUNCH_DEBUG
 	KWORKERMSG("Persist successful\n");
 #endif
@@ -1479,9 +1482,9 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct eraser_dev *rd;
 	char dummy;
 	int helper_pid, i;
-	int need_master_rot = 0;
 	u8 hash[HP_HASH_LEN];
 	u8 new_key[ERASER_KEY_LEN];
+	int need_master_rot = 0;
 
 	/*
 	 * argv[0]: real block device path
@@ -1612,31 +1615,31 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	rd->pprf_len = rd->hp_h->data_start - rd->hp_h->pprf_start;
 	if (rd->hp_h->pprf_capacity * sizeof(struct pprf_keynode) / ERASER_SECTOR > rd->pprf_len) {
-		DMINFO("Cap: %lu", rd->hp_h->pprf_capacity);
+		DMINFO("Cap: %u", rd->hp_h->pprf_capacity);
 		DMINFO("Size: %lu", sizeof(struct pprf_keynode));
-		DMINFO("Len: %lu", rd->pprf_len);
+		DMINFO("Len: %llu", rd->pprf_len);
 		ti->error = "Bad PPRF key length.";
 		goto read_header_fail;
 	}
 	rd->data_len = rd->hp_h->data_end - rd->hp_h->data_start;
 #ifdef HOLEPUNCH_DEBUG
-	DMINFO("Header start: %lu\n", 0);
-	DMINFO("Header sectors: %lu\n", ERASER_HEADER_LEN);
+	DMINFO("Header start: %d\n", 0);
+	DMINFO("Header sectors: %d\n", ERASER_HEADER_LEN);
 
-	DMINFO("Journal start: %lu\n", rd->hp_h->journal_start);
-	DMINFO("Journal sectors: %lu\n", HP_JOURNAL_LEN);
+	DMINFO("Journal start: %llu\n", rd->hp_h->journal_start);
+	DMINFO("Journal sectors: %d\n", HP_JOURNAL_LEN);
 
-	DMINFO("Key table start: %lu\n", rd->hp_h->key_table_start);
-	DMINFO("Key table sectors: %lu\n", rd->key_table_len);
+	DMINFO("Key table start: %llu\n", rd->hp_h->key_table_start);
+	DMINFO("Key table sectors: %llu\n", rd->key_table_len);
 
-	DMINFO("PPRF fkt start: %lu\n", rd->hp_h->fkt_start);
-	DMINFO("PPRF fkt sectors: %lu\n", rd->fkt_len);
+	DMINFO("PPRF fkt start: %llu\n", rd->hp_h->fkt_start);
+	DMINFO("PPRF fkt sectors: %llu\n", rd->fkt_len);
 
-	DMINFO("PPRF key start: %lu\n", rd->hp_h->pprf_start);
-	DMINFO("PPRF key sectors: %lu\n", rd->pprf_len);
+	DMINFO("PPRF key start: %llu\n", rd->hp_h->pprf_start);
+	DMINFO("PPRF key sectors: %llu\n", rd->pprf_len);
 
-	DMINFO("Data start: %lu\n", rd->hp_h->data_start);
-	DMINFO("Data sectors: %lu\n", rd->data_len);
+	DMINFO("Data start: %llu\n", rd->hp_h->data_start);
+	DMINFO("Data sectors: %llu\n", rd->data_len);
 #endif
 
 	/* Work caches and queues. */

@@ -139,13 +139,17 @@ struct holepunch_key {
 /* Chosen at random because I couldn't think of enough fun values. */
 #define HP_MAGIC1 0xbffb8ee808b32e40
 #define HP_MAGIC2 0xec993fbb3ce4623a
-#define HP_MAGIC3 0xe063c5b388fa48b9
 
+/*
+ * The padding is entirely unused, but AES complains if the total size is not
+ * block size multiple, so we start encrypting and decrypting at magic1, which
+ * is 16 bytes (one AES block) in.
+ */
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_filekey_sector {
 	u64 tag;
+	u64 padding;
 	u64 magic1;
 	u64 magic2;
-	u64 magic3;
 	struct holepunch_key entries[HP_KEY_PER_SECTOR];
 };
 
