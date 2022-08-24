@@ -338,6 +338,9 @@ static void holepunch_cbc_filekey_sector(struct eraser_dev *rd, void *dst,
 	holepunch_gen_iv(rd, iv, sectorno);
 	/* Exclude the tag, but include the magic bytes. */
 	holepunch_cbc(rd, dst + 16, src + 16, ERASER_SECTOR - 16, op, key, iv);
+	/* Still copy the tag if to a different destination, though. */
+	if (dst != src)
+		memcpy(dst, src, 8);
 }
 
 /*
@@ -1156,7 +1159,6 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	u32 punctured_keynode_index, new_keynode_start_index, new_keynode_end_index;
 	u32 punctured_keynode_sector, new_keynode_start_sector, new_keynode_end_sector;
 	u64 old_tag, s;
-	struct holepunch_filekey_sector *fktsector;
 	struct page *p;
 	void *map;
 
@@ -1169,16 +1171,15 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 		eraser_force_evict_map_cache(rd, false);
 		holepunch_rotate_pprf(rd);
 		HP_UP_WRITE(&rd->pprf_sem, "PPRF: persist -> refresh");
+		HP_DOWN(cache_lock, "PPRF: reacquire");
 		return;
 	}
 
 	/* proceed with puncturing */
-	fktsector = c->map;
-	old_tag = fktsector->tag;
-
-	fktsector->tag = rd->hp_h->tag_counter++;
+	old_tag = c->map->tag;
+	c->map->tag = rd->hp_h->tag_counter++;
 #ifdef HOLEPUNCH_DEBUG
-	KWORKERMSG("Tag: %llu -> %llu\n", old_tag, fktsector->tag);
+	KWORKERMSG("Tag: %llu -> %llu\n", old_tag, c->map->tag);
 #endif
 	holepunch_puncture_at_tag(rd, old_tag, &punctured_keynode_index,
 		&new_keynode_start_index, &new_keynode_end_index);
@@ -1623,23 +1624,23 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	rd->data_len = rd->hp_h->data_end - rd->hp_h->data_start;
 #ifdef HOLEPUNCH_DEBUG
-	DMINFO("Header start: %d\n", 0);
-	DMINFO("Header sectors: %d\n", ERASER_HEADER_LEN);
+	DMINFO("Header start: %d", 0);
+	DMINFO("Header sectors: %d", ERASER_HEADER_LEN);
 
-	DMINFO("Journal start: %llu\n", rd->hp_h->journal_start);
-	DMINFO("Journal sectors: %d\n", HP_JOURNAL_LEN);
+	DMINFO("Journal start: %llu", rd->hp_h->journal_start);
+	DMINFO("Journal sectors: %d", HP_JOURNAL_LEN);
 
-	DMINFO("Key table start: %llu\n", rd->hp_h->key_table_start);
-	DMINFO("Key table sectors: %llu\n", rd->key_table_len);
+	DMINFO("Key table start: %llu", rd->hp_h->key_table_start);
+	DMINFO("Key table sectors: %llu", rd->key_table_len);
 
-	DMINFO("PPRF fkt start: %llu\n", rd->hp_h->fkt_start);
-	DMINFO("PPRF fkt sectors: %llu\n", rd->fkt_len);
+	DMINFO("PPRF fkt start: %llu", rd->hp_h->fkt_start);
+	DMINFO("PPRF fkt sectors: %llu", rd->fkt_len);
 
-	DMINFO("PPRF key start: %llu\n", rd->hp_h->pprf_start);
-	DMINFO("PPRF key sectors: %llu\n", rd->pprf_len);
+	DMINFO("PPRF key start: %llu", rd->hp_h->pprf_start);
+	DMINFO("PPRF key sectors: %llu", rd->pprf_len);
 
-	DMINFO("Data start: %llu\n", rd->hp_h->data_start);
-	DMINFO("Data sectors: %llu\n", rd->data_len);
+	DMINFO("Data start: %llu", rd->hp_h->data_start);
+	DMINFO("Data sectors: %llu", rd->data_len);
 #endif
 
 	/* Work caches and queues. */
@@ -1938,16 +1939,16 @@ static struct target_type eraser_target = {
 static void config_messages(void)
 {
 #ifdef HOLEPUNCH_BATCHING
-	DMINFO("Batching enabled\n");
+	DMINFO("Batching enabled");
 #else
-	DMINFO("Batching disabled\n");
+	DMINFO("Batching disabled");
 #endif
 #ifdef HOLEPUNCH_DEBUG
-	DMINFO("HOLEPUNCH compiled in debug mode\n");
+	DMINFO("HOLEPUNCH compiled in debug mode");
 #endif
-	DMINFO("HP_PPRF_PER_SECTOR: %lu\n", HP_PPRF_PER_SECTOR);
-	DMINFO("HP_FKT_PER_SECTOR: %d\n", HP_FKT_PER_SECTOR);
-	DMINFO("HP_KEY_PER_SECTOR: %d\n", HP_KEY_PER_SECTOR);
+	DMINFO("HP_PPRF_PER_SECTOR: %lu", HP_PPRF_PER_SECTOR);
+	DMINFO("HP_FKT_PER_SECTOR: %d", HP_FKT_PER_SECTOR);
+	DMINFO("HP_KEY_PER_SECTOR: %d", HP_KEY_PER_SECTOR);
 }
 
 
