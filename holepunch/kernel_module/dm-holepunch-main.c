@@ -422,7 +422,7 @@ static void holepunch_write_header(struct eraser_dev *rd)
 {
 	holepunch_ecb(rd, rd->hp_h->iv_key, rd->iv_key, ERASER_KEY_LEN,
 		ERASER_ENCRYPT, rd->master_key);
-	eraser_rw_sector(0, WRITE, (char *)rd->hp_h, rd);
+	eraser_rw_sector(0, WRITE, rd->hp_h, rd);
 }
 
 static void holepunch_read_header(struct eraser_dev *rd)
@@ -492,34 +492,6 @@ static int holepunch_evaluate_at_tag(struct eraser_dev *rd, u64 tag, u8 *out,
 		rd, tag, out);
 }
 
-/* PPRF write lock outside. */
-static int holepunch_puncture_at_tag(struct eraser_dev *rd, u64 tag, u32 *punct,
-		u32 *start, u32 *end)
-{
-	struct pprf_keynode *new_key; /* Only used if expansion needed. */
-	*start = rd->hp_h->pprf_size;
-	*punct = puncture_at_tag(rd->pprf_key, rd->hp_h->pprf_depth,
-		holepunch_prg_generic, rd, &rd->hp_h->pprf_size, tag);
-	*end = rd->hp_h->pprf_size;
-
-	/* Expand the in-memory pprf key if needed. */
-	if (rd->hp_h->pprf_size + 2 * rd->hp_h->pprf_depth > rd->pprf_key_capacity) {
-		new_key = vmalloc(rd->pprf_key_capacity * HP_PPRF_EXPANSION_FACTOR
-			* sizeof(struct pprf_keynode));
-		/*
-		 * TODO for now we just ignore errors, but we should probably do
-		 * something about them
-		 */
-		if (!new_key)
-			DMERR("Insufficient memory!");
-		rd->pprf_key_capacity *= HP_PPRF_EXPANSION_FACTOR;
-		vfree(rd->pprf_key);
-		rd->pprf_key = new_key;
-	}
-	++rd->stats_puncture;
-	return 0;
-}
-
 /*
  * Journaling.
  */
@@ -549,6 +521,7 @@ static void holepunch_journal_commit(struct eraser_dev *rd)
 	rd->journal[0] = HPJ_NONE;
 	eraser_rw_sector(rd->hp_h->journal_start, WRITE, rd->journal, rd);
 	eraser_free_sector(rd->journal, rd);
+	rd->journal = NULL;
 }
 
 /*
@@ -1126,10 +1099,8 @@ static void holepunch_write_key_table_sector(struct eraser_dev *rd,
 static void holepunch_write_fkt_bottom_sector(struct eraser_dev *rd,
 		u64 index, char *map)
 {
-	u8 *key;
 	u64 sectorno;
-
-	key = holepunch_fkt_bottom_key(rd, index);
+	u8 *key = holepunch_fkt_bottom_key(rd, index);
 	kernel_random(key, ERASER_KEY_LEN);
 
 	sectorno = rd->hp_h->fkt_start + index / HP_FKT_PER_SECTOR;
@@ -1146,8 +1117,7 @@ static void holepunch_write_fkt_bottom_sector(struct eraser_dev *rd,
 static void holepunch_write_pprf_key_sector(struct eraser_dev *rd, u64 index,
 	char *map, bool fkt_refresh)
 {
-	u8 *key;
-	key = holepunch_pprf_key(rd, index);
+	u8 *key = holepunch_pprf_key(rd, index);
 	if (fkt_refresh) {
 		kernel_random(key, ERASER_KEY_LEN);
 		holepunch_write_fkt_bottom_sector(rd, index / HP_FKT_PER_SECTOR, map);
@@ -1164,11 +1134,12 @@ static void holepunch_write_pprf_key_sector(struct eraser_dev *rd, u64 index,
 static void holepunch_persist_unlink(struct eraser_dev *rd,
 		struct eraser_map_cache *c, struct semaphore *cache_lock)
 {
-	u32 punctured_keynode_index, new_keynode_start_index, new_keynode_end_index;
-	u32 punctured_keynode_sector, new_keynode_start_sector, new_keynode_end_sector;
+	u32 punctured_index, start_index, end_index;
+	u32 punctured_sector, start_sector, end_sector;
 	u64 old_tag, s;
 	struct page *p;
 	void *map;
+	struct pprf_keynode *new_key; /* Only used if expansion needed. */
 
 	/* If we refresh the PPRF, then we don't need to puncture again afterwards */
 	if (rd->hp_h->pprf_size + 2*rd->hp_h->pprf_depth > rd->hp_h->pprf_capacity) {
@@ -1188,29 +1159,50 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	c->map->tag = rd->hp_h->tag_counter++;
 #ifdef HOLEPUNCH_DEBUG
 	KWORKERMSG("Tag: %llu -> %llu\n", old_tag, c->map->tag);
+	KWORKERMSG("Keylength before: %u/%u, limit: %u\n", rd->hp_h->pprf_size,
+		rd->pprf_key_capacity, rd->hp_h->pprf_capacity);
 #endif
-	holepunch_puncture_at_tag(rd, old_tag, &punctured_keynode_index,
-		&new_keynode_start_index, &new_keynode_end_index);
 
-	punctured_keynode_sector = punctured_keynode_index / HP_PPRF_PER_SECTOR;
-	new_keynode_start_sector = new_keynode_start_index / HP_PPRF_PER_SECTOR;
-	new_keynode_end_sector = (new_keynode_end_index - 1) / HP_PPRF_PER_SECTOR;
+	start_index = rd->hp_h->pprf_size;
+	punctured_index = puncture_at_tag(rd->pprf_key, rd->hp_h->pprf_depth,
+		holepunch_prg_generic, rd, &rd->hp_h->pprf_size, old_tag);
+	end_index = rd->hp_h->pprf_size;
+
+	/* Expand the in-memory pprf key if needed. */
+	if (rd->hp_h->pprf_size + 2 * rd->hp_h->pprf_depth > rd->pprf_key_capacity) {
+		new_key = vmalloc(rd->pprf_key_capacity * HP_PPRF_EXPANSION_FACTOR
+			* sizeof(struct pprf_keynode));
+		/*
+		 * TODO for now we just ignore errors, but we should probably do
+		 * something about them
+		 */
+		if (!new_key)
+			DMERR("Insufficient memory!");
+		rd->pprf_key_capacity *= HP_PPRF_EXPANSION_FACTOR;
+		vfree(rd->pprf_key);
+		rd->pprf_key = new_key;
+	}
+	++rd->stats_puncture;
+
+	punctured_sector = punctured_index / HP_PPRF_PER_SECTOR;
+	start_sector = start_index / HP_PPRF_PER_SECTOR;
+	end_sector = (end_index - 1) / HP_PPRF_PER_SECTOR;
 
 #ifdef HOLEPUNCH_DEBUG
-	KWORKERMSG("Keylength: %u/%u, limit: %u\n", rd->hp_h->pprf_size,
+	KWORKERMSG("Keylength after: %u/%u, limit: %u\n", rd->hp_h->pprf_size,
 		rd->pprf_key_capacity, rd->hp_h->pprf_capacity);
 	KWORKERMSG("PPRF keynode indices touched: %u %u %u\n",
-		punctured_keynode_index, new_keynode_start_index, new_keynode_end_index);
+		punctured_index, start_index, end_index - 1);
 	KWORKERMSG("PPRF keynode sectors touched: %u %u %u\n",
-		punctured_keynode_sector, new_keynode_start_sector, new_keynode_end_sector);
+		punctured_sector, start_sector, end_sector);
 #endif
 	/* Persists new crypto information to disk */
 	p = eraser_allocate_page(rd);
 	map = kmap(p);
 
-	holepunch_write_pprf_key_sector(rd, punctured_keynode_sector, map, true);
-	if (new_keynode_start_sector > punctured_keynode_sector) {
-		for (s = new_keynode_start_sector; s <= new_keynode_end_sector; ++s) {
+	holepunch_write_pprf_key_sector(rd, punctured_sector, map, true);
+	if (start_sector > punctured_sector) {
+		for (s = start_sector; s <= end_sector; ++s) {
 			holepunch_write_pprf_key_sector(rd, s, map, false);
 		}
 	}
@@ -1759,6 +1751,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			break;
 	}
 	eraser_free_sector(rd->journal, rd);
+	rd->journal = NULL;
 
 	/* Rotate master key if there was a non-journalled crash. */
 	if (unlikely(rd->hp_h->in_use)) {

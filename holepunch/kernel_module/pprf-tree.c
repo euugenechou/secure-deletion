@@ -10,12 +10,12 @@
 #include <linux/timekeeping.h>
 #endif
 
-inline bool check_bit_is_set(u64 tag, u8 depth) 
+inline bool check_bit_is_set(u64 tag, u8 depth)
 {
 	return tag & (1ull << (63-depth));
 }
 
-inline void set_bit_in_buf(u64 *tag, u8 depth, bool val) 
+inline void set_bit_in_buf(u64 *tag, u8 depth, bool val)
 {
 	if (val)
 		*tag |= (1ull << (63-depth));
@@ -25,7 +25,7 @@ inline void set_bit_in_buf(u64 *tag, u8 depth, bool val)
 
 // some of these need error returns
 
-int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned len) 
+int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, unsigned len)
 {
 	*max_master_key_count = len / (sizeof(struct pprf_keynode));
 	if (*master_key) {
@@ -39,7 +39,7 @@ int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count
 /* we may need to zero out more than just the master key because of things
  * like page-granularity writes
  */
-void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, unsigned len) 
+void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, unsigned len)
 {
 	memset(master_key, 0, len);
     kernel_random(master_key->v.key, PRG_INPUT_LEN);
@@ -56,7 +56,7 @@ void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, uns
  * Will initialize depth to 0
  */
 struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
-		u64 tag, u32 *depth, int *index) 
+		u64 tag, u32 *depth, int *index)
 {
 	unsigned i;
 	struct pprf_keynode *cur;
@@ -122,7 +122,7 @@ struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
 }*/
 
 /* PPRF puncture operation
- * 
+ *
  * Returns -1 if the puncture was not possible (eg if a puncture
  * at that tag had already been executed)
  * Otherwise returns the index of the PPRF keynode that was changed
@@ -162,13 +162,13 @@ int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
 			root->v.next.il = *master_key_count+1;
 		}
 	#ifdef HOLEPUNCH_DEBUG
-		(pprf_base+*master_key_count)->lbl.label = tag;
-		set_bit_in_buf(&(pprf_base+*master_key_count)->lbl.label, depth, !set);
-		(pprf_base + *master_key_count)->lbl.depth = depth+1;
+		//(pprf_base+*master_key_count)->lbl.label = tag;
+		//set_bit_in_buf(&(pprf_base+*master_key_count)->lbl.label, depth, !set);
+		//(pprf_base + *master_key_count)->lbl.depth = depth+1;
 
-		(pprf_base+*master_key_count+1)->lbl.label = tag;
-		set_bit_in_buf(&(pprf_base + *master_key_count+1)->lbl.label, depth, set);
-		(pprf_base + *master_key_count+1)->lbl.depth = depth+1;
+		//(pprf_base+*master_key_count+1)->lbl.label = tag;
+		//set_bit_in_buf(&(pprf_base + *master_key_count+1)->lbl.label, depth, set);
+		//(pprf_base + *master_key_count+1)->lbl.depth = depth+1;
 	#endif
 		// (pprf_base + *master_key_count)->il = 0;
 		// (pprf_base + *master_key_count)->ir = 0;
@@ -196,7 +196,7 @@ int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *
 
 /* PPRF evaluation
  * 	Returns -1 if the tag has been punctured
- * 	Otherwise returns 0 and out should be filled with the 
+ * 	Otherwise returns 0 and out should be filled with the
  * 	evaluation of PPRF(tag)
  */
 int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8 *out)
@@ -211,7 +211,7 @@ int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u
 	memset(out, 0xcc, PRG_INPUT_LEN);
 #endif
 	root = find_key(pprf_base, pprf_depth, tag, &depth, NULL);
-	if (!root) 
+	if (!root)
 		return -1;
 
 	memcpy(keycpy, root->v.key, PRG_INPUT_LEN);
@@ -243,7 +243,7 @@ void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
     int i;
 	// u64 value = 0;
 	memset(node_label_str, '\0', len);
-	
+
 	if (lbl->depth == 0) {
 		node_label_str[0] = '\"';
 		node_label_str[1] = '\"';
@@ -260,7 +260,7 @@ void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 	u32 i;
 	struct pprf_keynode *node;
 	char node_label_str[8*NODE_LABEL_LEN+1];
-	
+
 	printk(KERN_INFO ": Master key dump START, len=%u:\n", *master_key_count);
 	for (i=0; i<*master_key_count; ++i) {
 		node = (pprf_base + i);
@@ -289,7 +289,7 @@ void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 #ifdef HOLEPUNCH_PPRF_TEST
 /* PPRF unit tests */
 
-void test_puncture_0(struct pprf_keynode **base, u32 *max_count, u32 *count, 
+void test_puncture_0(struct pprf_keynode **base, u32 *max_count, u32 *count,
 		struct crypto_blkcipher *tfm, u8 *iv) {
 	int r;
 	u8 pprf_depth;
@@ -330,7 +330,7 @@ void test_puncture_0(struct pprf_keynode **base, u32 *max_count, u32 *count,
 
 }
 
-void test_puncture_1(struct pprf_keynode **base, u32 *max_count, u32 *count, 
+void test_puncture_1(struct pprf_keynode **base, u32 *max_count, u32 *count,
 		struct crypto_blkcipher *tfm, u8 *iv) {
 	int r;
 	u8 pprf_depth;
@@ -359,7 +359,7 @@ void test_puncture_1(struct pprf_keynode **base, u32 *max_count, u32 *count,
 	print_master_key(*base, count);
 }
 
-void test_evaluate_0(struct pprf_keynode **base, u32 *max_count, u32 *count, 
+void test_evaluate_0(struct pprf_keynode **base, u32 *max_count, u32 *count,
 		struct crypto_blkcipher *tfm, u8 *iv) {
 	int r;
 	u8 pprf_depth;
@@ -404,7 +404,7 @@ void test_evaluate_0(struct pprf_keynode **base, u32 *max_count, u32 *count,
 
 }
 
-void test_evaluate_1(struct pprf_keynode **base, u32 *max_count, u32 *count, 
+void test_evaluate_1(struct pprf_keynode **base, u32 *max_count, u32 *count,
 		struct crypto_blkcipher *tfm, u8 *iv) {
 	int r,i,rd;
 	u8 pprf_depth;
@@ -454,7 +454,7 @@ void run_tests(void) {
 
 #ifdef HOLEPUNCH_PPRF_TIME
 
-void evaluate_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 *max_count, 
+void evaluate_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 *max_count,
 		u32 *count,	struct crypto_blkcipher *tfm, u8 *iv, u8 pprf_depth) {
 	int n;
 	u64 nsstart, nsend;
@@ -470,7 +470,7 @@ void evaluate_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 
 	printk(KERN_INFO "Time per eval: %lld us\n", (nsend-nsstart)/1000/reps);
 }
 
-void puncture_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 *max_count, 
+void puncture_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 *max_count,
 		u32 *count,	struct crypto_blkcipher *tfm, u8 *iv, u8 pprf_depth) {
 	int n;
 	u64 nsstart, nsend;
@@ -498,7 +498,7 @@ void preliminary_benchmark_cycle(void) {
 	printk(KERN_INFO "Depth = %u, %u reps per eval cycle\n", pprf_depth, maxreps);
 
 	tag_array = vmalloc(maxreps* sizeof(u64));
-	alloc_master_key(&base, &max_count, 
+	alloc_master_key(&base, &max_count,
 		2*pprf_depth*sizeof(struct pprf_keynode)*30000);
 	init_master_key(base, &count, 4096);
 

@@ -30,19 +30,19 @@ struct node_label {
 #endif
 
 /* Binary-tree based organization of the PPRF keys
- * 	
+ *
  * We lay out the tree in an array consisting of
  * 	{il, ir, key[len]} triples
  * il: index where the left child is stored
  * ir: index where the right child is stored
  * key: value of the PPRF key (only meaningful for leaf nodes)
- * 
+ *
  * two sentinel indices
  * 0: this is a leaf node
  * -1: the subtree has been punctured
- * 
+ *
  * root node is placed at index 0
- * 
+ *
  * In particular I /don't/ think we need to store depth information
  * in this implementation because the depth matches the depth in the
  * tree exactly
@@ -71,15 +71,13 @@ struct __attribute__((packed)) pprf_keynode {
 inline bool check_bit_is_set(u64 tag, u8 index);
 inline void set_bit_in_buf(u64 *tag, u8 index, bool val);
 
-int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, 
+int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count,
 		unsigned len);
-int expand_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count, 
-		unsigned factor);
-void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, 
+void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count,
 		unsigned len);
 
 struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
-		u64 tag, u32 *depth, int *index) ;
+		u64 tag, u32 *depth, int *index);
 int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
 	u32 *master_key_count, u64 tag);
 int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
