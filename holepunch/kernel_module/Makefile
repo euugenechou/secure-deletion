@@ -1,20 +1,20 @@
-LINUXROOT = ~/Desktop/linux
+LINUXROOT ?= ~/Desktop/linux
 obj-m := dm-holepunch.o
 dm-holepunch-y := dm-holepunch-main.o pprf-tree.o
 
-BATCH=0
+BATCH ?= 0
 ifeq ($(BATCH),1)
 ccflags-y += -DHOLEPUNCH_BATCHING
 endif
 
-PPRF_TEST=0
+PPRF_DEBUG ?= 0
 ifeq ($(PPRF_TEST),1)
-ccflags-y += -DHOLEPUNCH_PPRF_TEST
+ccflags-y += -DPPRF_DEBUG
 endif
 
-PPRF_TIME=0
+PPRF_TIME ?= 0
 ifeq ($(PPRF_TIME),1)
-ccflags-y += -DHOLEPUNCH_PPRF_TIME
+ccflags-y += -DPPRF_TIME
 endif
 
 all:

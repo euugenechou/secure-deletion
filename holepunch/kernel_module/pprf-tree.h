@@ -21,7 +21,7 @@ static inline void kernel_random(u8 *data, u64 len)
 // This is arbitrary. it can support 2^64 inodes. Currently supporting anything larger would involve some rewriting
 #define MAX_DEPTH 64
 
-#ifdef HOLEPUNCH_DEBUG
+#ifdef PPRF_DEBUG
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 struct node_label {
 	u64 label;
@@ -62,39 +62,30 @@ struct __attribute__((packed)) pprf_keynode {
 		} next;
 		u8 key[PRG_INPUT_LEN];
 	} v;
-	u8 flag;
-#ifdef HOLEPUNCH_DEBUG
+	u8 type;
+#ifdef PPRF_DEBUG
 	struct node_label lbl;
 #endif
 };
-
-inline bool check_bit_is_set(u64 tag, u8 index);
-inline void set_bit_in_buf(u64 *tag, u8 index, bool val);
 
 int alloc_master_key(struct pprf_keynode **master_key, u32 *max_master_key_count,
 		unsigned len);
 void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count,
 		unsigned len);
 
-struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
-		u64 tag, u32 *depth, int *index);
-int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-	u32 *master_key_count, u64 tag);
-int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-	u32 *master_key_count, u64 tag);
-int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8 *out);
-int evaluate_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8* out);
+int puncture_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
+	u32 *pprf_size, u64 tag);
+int evaluate_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
+	u64 tag, u8* key);
 
-#ifdef HOLEPUNCH_DEBUG
+#ifdef PPRF_DEBUG
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
 void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label *lbl);
 void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count);
-#endif
-
-#ifdef HOLEPUNCH_PPRF_TEST
 void run_tests(void);
 #endif
-#ifdef HOLEPUNCH_PPRF_TIME
+
+#ifdef PPRF_TIME
 void preliminary_benchmark(void);
 #endif
 

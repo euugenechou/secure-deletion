@@ -58,13 +58,6 @@
 
 
 #define MAX_DEPTH 64
-#ifdef ERASER_DEBUG
-#define NODE_LABEL_LEN (MAX_DEPTH+7)/8
-struct node_label {
-    u64 label;
-    u8 depth;
-};
-#endif
 
 struct __attribute__((packed)) pprf_keynode {
     union {
@@ -72,12 +65,9 @@ struct __attribute__((packed)) pprf_keynode {
             u32 il;
             u32 ir;
         } next;
-        char key[PRG_INPUT_LEN];
+        u8 key[PRG_INPUT_LEN];
     } v;
-    char flag;
-#ifdef ERASER_DEBUG
-    struct node_label lbl;
-#endif
+    u8 type;
 };
 
 

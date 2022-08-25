@@ -610,7 +610,7 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 	u8 key[ERASER_KEY_LEN];
 	p = eraser_allocate_page(rd);
 	plain = kmap(p);
-	new.flag = PPRF_KEYLEAF;
+	new.type = PPRF_KEYLEAF;
 	memcpy(new.v.key, new_key, ERASER_KEY_LEN);
 	/* Loop with new key until magic is wrong. */
 	for (s = rd->hp_h->key_table_start; s != rd->hp_h->fkt_start; ++s) {
@@ -1961,10 +1961,10 @@ static int __init dm_eraser_init(void)
 {
 	int r;
 
-#ifdef HOLEPUNCH_PPRF_TEST
+#ifdef PPRF_DEBUG
 	run_tests();
 #endif
-#ifdef HOLEPUNCH_PPRF_TIME
+#ifdef PPRF_TIME
 	preliminary_benchmark();
 #endif
 	eraser_sock = netlink_kernel_create(&init_net, ERASER_NETLINK, &eraser_netlink_cfg);
