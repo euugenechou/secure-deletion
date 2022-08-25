@@ -9,12 +9,12 @@ endif
 
 PPRF_TEST=0
 ifeq ($(PPRF_TEST),1)
-ccflags-y += -DHOLEPUNCH_PPRF_TEST
+ccflags-y += -DPPRF_TEST
 endif
 
 PPRF_TIME=0
 ifeq ($(PPRF_TIME),1)
-ccflags-y += -DHOLEPUNCH_PPRF_TIME
+ccflags-y += -DPPRF_TIME
 endif
 
 all:

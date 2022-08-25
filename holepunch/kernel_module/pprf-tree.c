@@ -10,12 +10,12 @@
 #include <linux/timekeeping.h>
 #endif
 
-inline bool check_bit_is_set(u64 tag, u8 depth)
+static inline bool check_bit_is_set(u64 tag, u8 depth)
 {
 	return tag & (1ull << (63-depth));
 }
 
-inline void set_bit_in_buf(u64 *tag, u8 depth, bool val)
+static inline void set_bit_in_buf(u64 *tag, u8 depth, bool val)
 {
 	if (val)
 		*tag |= (1ull << (63-depth));
@@ -45,199 +45,125 @@ void init_master_key(struct pprf_keynode *master_key, u32 *master_key_count, uns
     kernel_random(master_key->v.key, PRG_INPUT_LEN);
 	if (master_key_count)
 		*master_key_count = 1;
-	master_key->flag = PPRF_KEYLEAF;
+	master_key->type = PPRF_KEYLEAF;
 }
 
 
-/* Tree traversal
- *
- * Returns ptr to key or NULL if punctured
- * Additionally will write the node index to "index" if not NULL
- * Will initialize depth to 0
- */
-struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
-		u64 tag, u32 *depth, int *index)
-{
-	unsigned i;
-	struct pprf_keynode *cur;
-
-	i = 0;
-	*depth = 0;
-	do {
-		cur = pprf_base + i;
-		if (likely(index)) {
-			*index = i;
-		}
-		if (cur->flag == PPRF_KEYLEAF) {
-			return cur;
-		}
-		if (cur->flag == PPRF_INTERNAL) {
-			if(check_bit_is_set(tag, *depth))
-				i = cur->v.next.ir;
-			else
-				i = cur->v.next.il;
-		}
-		++*depth;
-	} while (*depth < pprf_depth);
-
-	cur = pprf_base + i;
-	if (cur->flag == PPRF_KEYLEAF) {
-		return cur;
-	}
-	return NULL;
-}
 /*
-New, but probably best to try things out a bit more in stages....
-struct pprf_keynode *find_key(struct pprf_keynode *pprf_base, u8 pprf_depth,
-		u64 tag, u32 *depth, int *index)
-{
-	struct pprf_keynode *cur = pprf_base;
-	for (*depth = 0; *depth <= pprf_depth; ++*depth) {
-		switch (cur->flag) {
-			case PPRF_KEYLEAF:
-				if (index)
-					*index = cur - pprf_base;
-				return cur;
-			case PPRF_INTERNAL:
-				/*
-				 * Not sure why this was done, but I'm just replicating the old
-				 * behavior exactly (except for faster puncture evals)
-				 *//*
-				if (*depth == pprf_depth)
-					/* Theoretically, I guess this should never occur *//*
-					return NULL;
-				if (check_bit_is_set(tag, *depth))
-					cur = pprf_base + cur->v.next.ir;
-				else
-					cur = pprf_base + cur->v.next.il;
-				break;
-			case PPRF_PUNCTURE:
-				return NULL;
-			default:
-				/* This should never happen! *//*
-				return NULL;
-		}
-	}
-	return NULL;
-}*/
-
-/* PPRF puncture operation
- *
- * Returns -1 if the puncture was not possible (eg if a puncture
- * at that tag had already been executed)
- * Otherwise returns the index of the PPRF keynode that was changed
- * as a result of the puncture (used for writeback purposes).
+ * Basic tree traversal; returns the first keyleaf matching `tag`, or NULL if
+ * punctured at `tag`. Sets `depth` to the depth of the relevant keyleaf.
  */
-int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-	u32 *master_key_count, u64 tag) {
-	u32 depth;
-	u8 keycpy[PRG_INPUT_LEN];
-	u8 tmp[2*PRG_INPUT_LEN];
-	bool set;
-	int root_index;
-	struct pprf_keynode *root;
-
-	root = find_key(pprf_base, pprf_depth, tag, &depth, &root_index);
-	// it will be NULL if its already been punctured, in which case we just return
-	if (!root) {
-		return -1;
-	}
-
-	// 2. find all neighbors in path
-	memcpy(keycpy, root->v.key, PRG_INPUT_LEN);
-	memset(root->v.key, 0, PRG_INPUT_LEN);
-	root->flag = PPRF_INTERNAL;
-	while (depth < pprf_depth) {
-		p(data, keycpy, tmp);
-		set = check_bit_is_set(tag, depth);
-		if (set) {
-			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
-			memcpy((pprf_base + *master_key_count)->v.key, tmp, PRG_INPUT_LEN);
-			root->v.next.il = *master_key_count;
-			root->v.next.ir = *master_key_count+1;
+static struct pprf_keynode *find_key(struct pprf_keynode *pprf, u8 pprf_depth,
+		u64 tag, u32 *depth)
+{
+	struct pprf_keynode *cur = pprf;
+	for (*depth = 0; *depth < pprf_depth; ++*depth) {
+		if (cur->type == PPRF_KEYLEAF) {
+			break;
+		} else if (cur->type == PPRF_INTERNAL) {
+			if (check_bit_is_set(tag, *depth))
+				cur = pprf + cur->v.next.ir;
+			else
+				cur = pprf + cur->v.next.il;
 		} else {
-			memcpy(keycpy, tmp, PRG_INPUT_LEN);
-			memcpy((pprf_base + *master_key_count)->v.key, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
-			root->v.next.ir = *master_key_count;
-			root->v.next.il = *master_key_count+1;
+			cur = NULL;
+			break;
 		}
-	#ifdef HOLEPUNCH_DEBUG
-		(pprf_base+*master_key_count)->lbl.label = tag;
-		set_bit_in_buf(&(pprf_base+*master_key_count)->lbl.label, depth, !set);
-		(pprf_base + *master_key_count)->lbl.depth = depth+1;
-
-		(pprf_base+*master_key_count+1)->lbl.label = tag;
-		set_bit_in_buf(&(pprf_base + *master_key_count+1)->lbl.label, depth, set);
-		(pprf_base + *master_key_count+1)->lbl.depth = depth+1;
-	#endif
-		// (pprf_base + *master_key_count)->il = 0;
-		// (pprf_base + *master_key_count)->ir = 0;
-		(pprf_base + *master_key_count)->flag = PPRF_KEYLEAF;
-		(pprf_base + *master_key_count+1)->flag = PPRF_INTERNAL;
-		*master_key_count += 2;
-		++depth;
-		root = (pprf_base + *master_key_count-1);
 	}
-	// At the end of the loop, the root node is always a punctured node. So set links accordingly
-	// root->il = -1;
-	// root->ir = -1;
-	root->flag = PPRF_PUNCTURE;
-
-	return root_index;
+	return cur;
 }
 
-int puncture_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
-		u32 *master_key_count, u64 tag)
-{
-	tag <<= (64-pprf_depth);
-	return puncture(pprf_base, pprf_depth, p, data, master_key_count, tag);
-}
-
-
-/* PPRF evaluation
- * 	Returns -1 if the tag has been punctured
- * 	Otherwise returns 0 and out should be filled with the
- * 	evaluation of PPRF(tag)
- */
-int evaluate(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8 *out)
+/* PPRF evaluation; returns 0 for success, -1 if `tag` was punctured. */
+static int evaluate(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
+	u64 tag, u8 *key)
 {
 	u32 depth;
-	u8 keycpy[PRG_INPUT_LEN];
-	u8 tmp[2*PRG_INPUT_LEN];
-	bool set;
-	struct pprf_keynode *root;
-
-#ifdef HOLEPUNCH_DEBUG
-	memset(out, 0xcc, PRG_INPUT_LEN);
-#endif
-	root = find_key(pprf_base, pprf_depth, tag, &depth, NULL);
+	u8 in[PRG_INPUT_LEN];
+	u8 out[PRG_INPUT_LEN*2];
+	struct pprf_keynode *root = find_key(pprf, pprf_depth, tag, &depth);
 	if (!root)
 		return -1;
 
-	memcpy(keycpy, root->v.key, PRG_INPUT_LEN);
-
-	for (; depth<pprf_depth; ++depth) {
-		p(data, keycpy, tmp);
-		set = check_bit_is_set(tag, depth);
-		if (set) {
-			memcpy(keycpy, tmp+PRG_INPUT_LEN, PRG_INPUT_LEN);
+	memcpy(in, root->v.key, PRG_INPUT_LEN);
+	for (; depth < pprf_depth; ++depth) {
+		p(data, in, out);
+		if (check_bit_is_set(tag, depth)) {
+			memcpy(in, out + PRG_INPUT_LEN, PRG_INPUT_LEN);
 		} else {
-			memcpy(keycpy, tmp, PRG_INPUT_LEN);
+			memcpy(in, out, PRG_INPUT_LEN);
 		}
 	}
-	memcpy(out, keycpy, PRG_INPUT_LEN);
+	memcpy(key, in, PRG_INPUT_LEN);
 	return 0;
 }
 
-int evaluate_at_tag(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data, u64 tag, u8* out)
+int evaluate_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
+	u64 tag, u8* key)
 {
-	tag <<= (64-pprf_depth);
-	return evaluate(pprf_base, pprf_depth, p, data, tag, out);
+	tag <<= 64 - pprf_depth;
+	return evaluate(pprf, pprf_depth, p, data, tag, key);
 }
 
+/*
+ * PPRF puncturing; returns -1 if the puncture was not possible (`tag` was
+ * already punctured), otherwise the index of the PPRF keynode that was changed
+ * as a result of the puncture (used for writeback purposes).
+ */
+static int puncture(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
+	u32 *pprf_size, u64 tag) {
+	u32 depth;
+	u8 in[PRG_INPUT_LEN];
+	u8 out[PRG_INPUT_LEN*2];
+	int index, set;
+	struct pprf_keynode *root = find_key(pprf, pprf_depth, tag, &depth);
+	if (!root)
+		return -1;
+
+	memcpy(in, root->v.key, PRG_INPUT_LEN);
+	memset(root->v.key, 0, PRG_INPUT_LEN);
+	root->type = PPRF_INTERNAL;
+	index = root - pprf;
+	for (; depth < pprf_depth; ++depth) {
+		p(data, in, out);
+		set = check_bit_is_set(tag, depth);
+		if (set) {
+			memcpy(in, out + PRG_INPUT_LEN, PRG_INPUT_LEN);
+			memcpy((pprf + *pprf_size)->v.key, out, PRG_INPUT_LEN);
+			root->v.next.il = *pprf_size;
+			root->v.next.ir = *pprf_size + 1;
+		} else {
+			memcpy(in, out, PRG_INPUT_LEN);
+			memcpy((pprf + *pprf_size)->v.key, out + PRG_INPUT_LEN, PRG_INPUT_LEN);
+			root->v.next.ir = *pprf_size;
+			root->v.next.il = *pprf_size + 1;
+		}
+#ifdef HOLEPUNCH_DEBUG
+		(pprf + *pprf_size)->lbl.label = tag;
+		set_bit_in_buf(&(pprf + *pprf_size)->lbl.label, depth, !set);
+		(pprf + *pprf_size)->lbl.depth = depth + 1;
+
+		(pprf + *pprf_size + 1)->lbl.label = tag;
+		set_bit_in_buf(&(pprf + *pprf_size + 1)->lbl.label, depth, set);
+		(pprf + *pprf_size + 1)->lbl.depth = depth + 1;
+#endif
+		(pprf + *pprf_size)->type = PPRF_KEYLEAF;
+		(pprf + *pprf_size + 1)->type = PPRF_INTERNAL;
+		root = pprf + *pprf_size + 1;
+		*pprf_size += 2;
+	}
+	root->type = PPRF_PUNCTURE;
+
+	return index;
+}
+
+int puncture_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
+		u32 *pprf_size, u64 tag)
+{
+	tag <<= 64 - pprf_depth;
+	return puncture(pprf, pprf_depth, p, data, pprf_size, tag);
+}
 
 #ifdef HOLEPUNCH_DEBUG
-// printing functions
 void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 	u64 bit;
     int i;
@@ -255,7 +181,6 @@ void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
 	}
 }
 
-
 void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 	u32 i;
 	struct pprf_keynode *node;
@@ -265,10 +190,10 @@ void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 	for (i=0; i<*master_key_count; ++i) {
 		node = (pprf_base + i);
 		label_to_string(&node->lbl, node_label_str, 8*NODE_LABEL_LEN+1);
-		if (node->flag == PPRF_INTERNAL) {
+		if (node->type == PPRF_INTERNAL) {
 			printk(KERN_INFO "n:%u, il:%u, ir:%u, label:%s\n",
 				i, node->v.next.il, node->v.next.ir, node_label_str);
-		} else if (node->flag == PPRF_KEYLEAF) {
+		} else if (node->type == PPRF_KEYLEAF) {
 			printk(KERN_INFO "n:%u, key: %32ph, label:%s\n",
 				i, node->v.key, node_label_str);
 		} else {
@@ -284,11 +209,7 @@ void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
 }
 #endif
 
-
-
-#ifdef HOLEPUNCH_PPRF_TEST
-/* PPRF unit tests */
-
+#ifdef PPRF_TEST
 void test_puncture_0(struct pprf_keynode **base, u32 *max_count, u32 *count,
 		struct crypto_blkcipher *tfm, u8 *iv) {
 	int r;
@@ -448,12 +369,10 @@ void run_tests(void) {
 
 	vfree(base);
 }
-
 #endif
 
 
 #ifdef HOLEPUNCH_PPRF_TIME
-
 void evaluate_n_times(u64* tag_array, int reps, struct pprf_keynode **base, u32 *max_count,
 		u32 *count,	struct crypto_blkcipher *tfm, u8 *iv, u8 pprf_depth) {
 	int n;
@@ -524,5 +443,4 @@ void preliminary_benchmark_cycle(void) {
 void preliminary_benchmark(void) {
 	preliminary_benchmark_cycle();
 }
-
 #endif
