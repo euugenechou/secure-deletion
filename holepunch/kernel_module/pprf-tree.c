@@ -164,48 +164,49 @@ int puncture_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
 }
 
 #ifdef HOLEPUNCH_DEBUG
-void label_to_string(struct node_label *lbl, char* node_label_str, u16 len) {
-	u64 bit;
+void label_to_string(struct node_label *lbl, char *node_label)
+{
     int i;
-	// u64 value = 0;
-	memset(node_label_str, '\0', len);
-
 	if (lbl->depth == 0) {
-		node_label_str[0] = '\"';
-		node_label_str[1] = '\"';
+		strcpy(node_label, "\"\"");
 	} else {
-		for (i=0; i<lbl->depth; ++i) {
-			bit = check_bit_is_set(lbl->label, i);
-			node_label_str[i] = bit ? '1' : '0';
+		for (i = 0; i < lbl->depth; ++i) {
+			node_label[i] = check_bit_is_set(lbl->label, i) ? '1' : '0';
 		}
+		node_label[i] = 0;
 	}
 }
 
-void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count) {
-	u32 i;
-	struct pprf_keynode *node;
-	char node_label_str[8*NODE_LABEL_LEN+1];
-
-	printk(KERN_INFO ": Master key dump START, len=%u:\n", *master_key_count);
-	for (i=0; i<*master_key_count; ++i) {
-		node = (pprf_base + i);
-		label_to_string(&node->lbl, node_label_str, 8*NODE_LABEL_LEN+1);
-		if (node->type == PPRF_INTERNAL) {
-			printk(KERN_INFO "n:%u, il:%u, ir:%u, label:%s\n",
-				i, node->v.next.il, node->v.next.ir, node_label_str);
-		} else if (node->type == PPRF_KEYLEAF) {
-			printk(KERN_INFO "n:%u, key: %32ph, label:%s\n",
-				i, node->v.key, node_label_str);
-		} else {
-			printk(KERN_INFO "n:%u, <punctured>, label:%s\n", i, node_label_str);
-		}
-		// printk(KERN_INFO "n:%u, ", i);
-		// printk(KERN_CONT "il:%u, ", node->il);
-		// printk(KERN_CONT "ir:%u, ", node->ir);
-		// printk(KERN_CONT "key:%32ph, ", node->key);
-		// printk(KERN_CONT "label:%s\n", node_label_str);
+void dump_key(u8 *key, char *name)
+{
+	char buf[PRG_INPUT_LEN * 3 + 1];
+	int i;
+	for (i = 0; i < PRG_INPUT_LEN; ++i) {
+		sprintf(buf + i * 3, "%02hhx ", key[i]);
 	}
-	printk(KERN_INFO ": END Master key dump\n");
+	buf[sizeof(buf) - 1] = '\0';
+	printk(KERN_INFO "%s: %s", name, buf);
+}
+
+void print_pprf(struct pprf_keynode *pprf, u32 pprf_size)
+{
+	u32 i;
+	char node_label[MAX_DEPTH + 1];
+	char title[50 + sizeof(node_label)];
+
+	printk(KERN_INFO "PPRF dump, len %u", pprf_size);
+	for (i = 0; i < pprf_size; ++i) {
+		label_to_string(&pprf[i].lbl, node_label);
+		if (pprf[i].type == PPRF_INTERNAL) {
+			printk(KERN_INFO "index %u label %s: il: %u ir: %u", i, node_label,
+				pprf[i].v.next.il, pprf[i].v.next.ir);
+		} else if (pprf[i].type == PPRF_KEYLEAF) {
+			sprintf(title, "index %u label %s", i, node_label);
+			dump_key(pprf[i].v.key, title);
+		} else {
+			printk(KERN_INFO "index %u label %s: punctured", i, node_label);
+		}
+	}
 }
 #endif
 

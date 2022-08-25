@@ -22,7 +22,6 @@ static inline void kernel_random(u8 *data, u64 len)
 #define MAX_DEPTH 64
 
 #ifdef HOLEPUNCH_DEBUG
-#define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 struct node_label {
 	u64 label;
 	u8 depth;
@@ -79,9 +78,9 @@ int evaluate_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
 	u64 tag, u8* key);
 
 #ifdef HOLEPUNCH_DEBUG
-void label_to_string(struct node_label *lbl, char* node_label_str, u16 len);
-void print_pkeynode_debug(struct pprf_keynode *master_key, u8 pprf_depth, struct node_label *lbl);
-void print_master_key(struct pprf_keynode *pprf_base, u32 *master_key_count);
+void label_to_string(struct node_label *lbl, char *node_label);
+void dump_key(u8 *key, char *name);
+void print_pprf(struct pprf_keynode *pprf, u32 pprf_size);
 #endif
 
 #ifdef PPRF_TEST

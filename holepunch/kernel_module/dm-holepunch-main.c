@@ -1158,6 +1158,7 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	KWORKERMSG("Tag: %llu -> %llu\n", old_tag, c->map->tag);
 	KWORKERMSG("Keylength before: %u/%u, limit: %u\n", rd->hp_h->pprf_size,
 		rd->pprf_key_capacity, rd->hp_h->pprf_capacity);
+	// print_pprf(rd->pprf_key, rd->hp_h->pprf_size);
 #endif
 
 	start_index = rd->hp_h->pprf_size;
@@ -1175,6 +1176,8 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 		 */
 		if (!new_key)
 			DMERR("Insufficient memory!");
+		memcpy(new_key, rd->pprf_key, rd->pprf_key_capacity
+			* sizeof(struct pprf_keynode));
 		rd->pprf_key_capacity *= HP_PPRF_EXPANSION_FACTOR;
 		vfree(rd->pprf_key);
 		rd->pprf_key = new_key;
@@ -1192,6 +1195,7 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 		punctured_index, start_index, end_index - 1);
 	KWORKERMSG("PPRF keynode sectors touched: %u %u %u\n",
 		punctured_sector, start_sector, end_sector);
+	// print_pprf(rd->pprf_key, rd->hp_h->pprf_size);
 #endif
 	/* Persists new crypto information to disk */
 	p = eraser_allocate_page(rd);
@@ -1471,21 +1475,6 @@ static struct netlink_kernel_cfg eraser_netlink_cfg =
 	.cb_mutex = NULL,
 	.bind = NULL,
 };
-
-#ifdef HOLEPUNCH_DEBUG
-static void dump_key(u8 *key, const char *name)
-{
-	char *buf;
-	int i;
-	buf = kmalloc(ERASER_KEY_LEN * 3 + 1, GFP_KERNEL);
-	for (i = 0; i < ERASER_KEY_LEN; ++i) {
-		sprintf(buf + i * 3, "%02hhx ", key[i]);
-	}
-	buf[ERASER_KEY_LEN * 3] = '\0';
-	DMINFO("%s: %s", name, buf);
-	kfree(buf);
-}
-#endif
 
 /*
  * Constructor.
@@ -1800,6 +1789,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	dump_key(rd->master_key, "Master key");
 	dump_key(rd->sec_key, "Sector key");
 	dump_key(rd->hp_h->iv_key, "IV key");
+	DMINFO("Construction complete");
 #endif
 	return 0;
 
