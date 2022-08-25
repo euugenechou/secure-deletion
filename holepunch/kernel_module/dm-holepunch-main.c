@@ -311,7 +311,7 @@ static void holepunch_gen_iv(struct eraser_dev *rd, u8 *iv, u64 sector)
 {
 	u8 input[ERASER_IV_LEN] = {0};
 	*(u64 *) input = sector;
-	holepunch_ecb(rd, iv, input, ERASER_IV_LEN, ERASER_ENCRYPT, rd->iv_key);
+	holepunch_ecb(rd, iv, input, ERASER_IV_LEN, ERASER_ENCRYPT, rd->hp_h->iv_key);
 }
 
 /* Perform AES-CBC on a single sector. */
@@ -418,18 +418,15 @@ static inline void *eraser_rw_sector(u64 sector, int rw, void *write_buf, struct
 	return __eraser_rw_sector(rd->real_dev->bdev, sector, rw, write_buf, rd);
 }
 
+// TODO improve these (see later note)
 static void holepunch_write_header(struct eraser_dev *rd)
 {
-	holepunch_ecb(rd, rd->hp_h->iv_key, rd->iv_key, ERASER_KEY_LEN,
-		ERASER_ENCRYPT, rd->master_key);
 	eraser_rw_sector(0, WRITE, rd->hp_h, rd);
 }
 
 static void holepunch_read_header(struct eraser_dev *rd)
 {
 	rd->hp_h = eraser_rw_sector(0, READ, NULL, rd);
-	holepunch_ecb(rd, rd->iv_key, rd->hp_h->iv_key, ERASER_KEY_LEN,
-		ERASER_DECRYPT, rd->master_key);
 }
 
 /*
@@ -1475,6 +1472,21 @@ static struct netlink_kernel_cfg eraser_netlink_cfg =
 	.bind = NULL,
 };
 
+#ifdef HOLEPUNCH_DEBUG
+static void dump_key(u8 *key, const char *name)
+{
+	char *buf;
+	int i;
+	buf = kmalloc(ERASER_KEY_LEN * 3 + 1, GFP_KERNEL);
+	for (i = 0; i < ERASER_KEY_LEN; ++i) {
+		sprintf(buf + i * 3, "%02hhx ", key[i]);
+	}
+	buf[ERASER_KEY_LEN * 3] = '\0';
+	DMINFO("%s: %s", name, buf);
+	kfree(buf);
+}
+#endif
+
 /*
  * Constructor.
  */
@@ -1784,8 +1796,11 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	rd->stats_evaluate = 0;
 	rd->stats_puncture = 0;
 	rd->stats_refresh = 0;
-
-	DMINFO("Success.");
+#ifdef HOLEPUNCH_DEBUG
+	dump_key(rd->master_key, "Master key");
+	dump_key(rd->sec_key, "Sector key");
+	dump_key(rd->hp_h->iv_key, "IV key");
+#endif
 	return 0;
 
 	/* Lots to clean up after an error. */
@@ -1873,7 +1888,6 @@ static void eraser_dtr(struct dm_target *ti)
 	memset(rd->new_master_key, 0, ERASER_KEY_LEN);
 	memset(rd->master_key, 0, ERASER_KEY_LEN);
 	memset(rd->sec_key, 0, ERASER_KEY_LEN);
-	memset(rd->iv_key, 0, ERASER_KEY_LEN);
 
 	DMINFO("write header");
 	/* Write header. */

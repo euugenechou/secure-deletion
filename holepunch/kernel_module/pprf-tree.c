@@ -162,13 +162,13 @@ int puncture(struct pprf_keynode *pprf_base, u8 pprf_depth, prg p, void *data,
 			root->v.next.il = *master_key_count+1;
 		}
 	#ifdef HOLEPUNCH_DEBUG
-		//(pprf_base+*master_key_count)->lbl.label = tag;
-		//set_bit_in_buf(&(pprf_base+*master_key_count)->lbl.label, depth, !set);
-		//(pprf_base + *master_key_count)->lbl.depth = depth+1;
+		(pprf_base+*master_key_count)->lbl.label = tag;
+		set_bit_in_buf(&(pprf_base+*master_key_count)->lbl.label, depth, !set);
+		(pprf_base + *master_key_count)->lbl.depth = depth+1;
 
-		//(pprf_base+*master_key_count+1)->lbl.label = tag;
-		//set_bit_in_buf(&(pprf_base + *master_key_count+1)->lbl.label, depth, set);
-		//(pprf_base + *master_key_count+1)->lbl.depth = depth+1;
+		(pprf_base+*master_key_count+1)->lbl.label = tag;
+		set_bit_in_buf(&(pprf_base + *master_key_count+1)->lbl.label, depth, set);
+		(pprf_base + *master_key_count+1)->lbl.depth = depth+1;
 	#endif
 		// (pprf_base + *master_key_count)->il = 0;
 		// (pprf_base + *master_key_count)->ir = 0;

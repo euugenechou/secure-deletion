@@ -170,7 +170,7 @@ struct holepunch_header {
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
 	u64 nv_index;                         /* Master key TPM NVRAM index. */
 
-	/* IV generation key, encrypted by master key. */
+	/* IV generation key. TODO should this be encrypted? */
 	u8 iv_key[ERASER_KEY_LEN];
 
 	/* All in ERASER sectors, strictly consecutive; header starts at zero. */
@@ -289,7 +289,6 @@ struct eraser_dev {
 	u8 *sec_key;                       /* Sector encryption key. */
 	u8 master_key[ERASER_KEY_LEN];     /* File encryption master key. */
 	u8 new_master_key[ERASER_KEY_LEN]; /* Temporary key before syncing to TPM. */
-	u8 iv_key[ERASER_KEY_LEN];         /* IV generation key. */
 	struct completion master_key_wait;
 	unsigned long master_key_status;   /* Key status flags. */
 	int helper_pid;                    /* Netlink talks to this pid. */
