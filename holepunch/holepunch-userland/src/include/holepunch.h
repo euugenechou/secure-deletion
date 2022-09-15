@@ -62,11 +62,11 @@
 #define NODE_LABEL_LEN (MAX_DEPTH+7)/8
 struct node_label {
     u64 label;
-    u8 depth;
+    char depth;
 };
 #endif
 
-struct __attribute__((packed)) pprf_keynode {
+struct pprf_keynode {
     union {
         struct {
             u32 il;
@@ -104,14 +104,14 @@ struct eraser_header {
 
 /* Holepunch header; must match the definition in kernel. */
 struct holepunch_header {
-    u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
-    u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
-    u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
-    u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
+    char enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
+    char enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
+    char enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
+    char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
     u64 nv_index;                         /* Master key TPM NVRAM index. */
 
     /* IV generation key, encrypted by master key. */
-    u8 iv_key[ERASER_KEY_LEN];
+    char iv_key[ERASER_KEY_LEN];
 
     /* All in ERASER sectors, strictly consecutive; header starts at zero. */
     u64 journal_start;
@@ -128,17 +128,16 @@ struct holepunch_header {
     /* The maximum number of keynodes we can store on disk. */
     u32 pprf_capacity;
 
-    /* The current number of keynodes in the PPRF key. */
-    u32 pprf_size;
-    u64 tag_counter;
-
     /* The maximum PPRF depth. */
-    u8 pprf_depth;
-    u8 in_use;
+    char pprf_depth;
+    char in_use;
+
+    /* tag_counter and pprf_size are stored in the top-level FKT block
+	 * since they are mutable - this helps save an IO op */
 };
 
 struct holepunch_key {
-    u8 key[ERASER_KEY_LEN];
+    char key[ERASER_KEY_LEN];
 };
 
 /* Journal constants; only HPJ_PPRF_INIT needed, but whatever. */

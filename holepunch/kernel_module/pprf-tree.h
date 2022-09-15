@@ -53,7 +53,7 @@ enum {
 	PPRF_PUNCTURE,
 };
 
-struct __attribute__((packed)) pprf_keynode {
+struct pprf_keynode {
 	union {
 		struct {
 			u32 il;

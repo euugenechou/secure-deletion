@@ -444,7 +444,9 @@ void do_create(char *dev_path, int nv_index) {
     /* Compute sizes for holepunch metadata */
     struct holepunch_header *hp_h = malloc(ERASER_SECTOR * ERASER_HEADER_LEN);
     u64 key_table_len = div_ceil(inode_count, HP_KEY_PER_SECTOR);
-    // XXX how is this calculated? it feels a little arbitrary
+
+    /* The depth of the pprf is chosen such that num leaves is at least the
+     * number of files + number of punctures before refresh is forced */
     hp_h->pprf_depth = 32 - __builtin_clz(key_table_len + HOLEPUNCH_REFRESH_INTERVAL);
     hp_h->pprf_capacity = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH_MULT * hp_h->pprf_depth;
     u64 pprf_len = div_ceil(hp_h->pprf_capacity, HP_PPRF_PER_SECTOR);
@@ -457,7 +459,7 @@ void do_create(char *dev_path, int nv_index) {
     hp_h->pprf_start = hp_h->fkt_start + hp_h->fkt_bottom_width + hp_h->fkt_top_width;
     hp_h->data_start = hp_h->pprf_start + pprf_len;
     hp_h->data_end = dev_size / ERASER_SECTOR;
-    hp_h->pprf_size = 1;
+    // hp_h->pprf_size = 1;
     hp_h->in_use = 0;
 // #ifdef ERASER_DEBUG
     print_green("-> Holepunch PPRF depth: %u\n\n", hp_h->pprf_depth);

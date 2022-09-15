@@ -7,6 +7,11 @@ ifeq ($(BATCH),1)
 ccflags-y += -DHOLEPUNCH_BATCHING
 endif
 
+JNL=0
+ifeq ($(JNL), 1)
+ccflags-y += -DHOLEPUNCH_JOURNAL
+endif
+
 PPRF_TEST=0
 ifeq ($(PPRF_TEST),1)
 ccflags-y += -DPPRF_TEST

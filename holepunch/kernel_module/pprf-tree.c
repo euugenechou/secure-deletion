@@ -110,7 +110,8 @@ int evaluate_at_tag(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
  * as a result of the puncture (used for writeback purposes).
  */
 static int puncture(struct pprf_keynode *pprf, u8 pprf_depth, prg p, void *data,
-	u32 *pprf_size, u64 tag) {
+		u32 *pprf_size, u64 tag) 
+{
 	u32 depth;
 	u8 in[PRG_INPUT_LEN];
 	u8 out[PRG_INPUT_LEN*2];
@@ -185,7 +186,7 @@ void dump_key(u8 *key, char *name)
 		sprintf(buf + i * 3, "%02hhx ", key[i]);
 	}
 	buf[sizeof(buf) - 1] = '\0';
-	printk(KERN_INFO "%s: %s", name, buf);
+	printk(KERN_INFO "%s: %s\n", name, buf);
 }
 
 void print_pprf(struct pprf_keynode *pprf, u32 pprf_size)

@@ -134,7 +134,7 @@ struct holepunch_key {
 
 #define HP_KEY_PER_SECTOR ((ERASER_SECTOR - 32)/ERASER_KEY_LEN)
 #define HP_PPRF_PER_SECTOR (ERASER_SECTOR/sizeof(struct pprf_keynode))
-#define HP_FKT_PER_SECTOR (ERASER_SECTOR/ERASER_KEY_LEN)
+#define HP_FKT_PER_SECTOR ((ERASER_SECTOR - 16)/ERASER_KEY_LEN)
 
 /* Chosen at random because I couldn't think of enough fun values. */
 #define HP_MAGIC1 0xbffb8ee808b32e40
@@ -158,11 +158,17 @@ struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_keynode_sector {
 };
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
+	/* The current number of keynodes in the PPRF key. */
+	u32 pprf_size;
+	u64 tag_counter;
+	u32 padding;
 	struct holepunch_key entries[HP_FKT_PER_SECTOR];
 };
 
 
-/* Holepunch header; must match the definition in userspace. */
+/* Holepunch header; must match the definition in userspace. 
+ * The kernel module should treat this as read-only
+ */
 struct holepunch_header {
 	u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
 	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
@@ -188,13 +194,12 @@ struct holepunch_header {
 	/* The maximum number of keynodes we can store on disk. */
 	u32 pprf_capacity;
 
-	/* The current number of keynodes in the PPRF key. */
-	u32 pprf_size;
-	u64 tag_counter;
-
 	/* The maximum PPRF depth. */
 	u8 pprf_depth;
 	u8 in_use;
+
+	/* tag_counter and pprf_size are stored in the top-level FKT block
+	 * since they are mutable - this helps save an IO op */
 };
 
 /*
@@ -247,13 +252,6 @@ struct holepunch_header {
 /*
  * Map entry and cache structs.
  */
-/* Size padded to 64 bytes, must be multiple of sector size. */
-// struct eraser_map_entry {
-// 	u8 key[ERASER_KEY_LEN];
-// 	u8 iv[ERASER_IV_LEN];
-// 	u64 status;
-// 	u64 padding;
-// };
 
 #define ERASER_MAP_CACHE_BUCKETS 1024
 
