@@ -284,7 +284,7 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
         print_red("DEBUG: Cannot create dm_task\n");
         return 0;
     }
-
+    
     if (!dm_task_set_name(dmt, mapped_dev)) {
         print_red("DEBUG: Cannot set device name\n");
         goto out;
@@ -308,6 +308,7 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
         print_red("DEBUG: Cannot issue ioctl\n");
         goto out;
     }
+    print_green("HP device created!\n");
 
 #ifdef ERASER_NO_UDEV
     dm_mknodes(mapped_dev);
@@ -316,8 +317,11 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
     is_success = 1;
 
 out:
+    print_green("waiting for cookie\n");
     dm_udev_wait(cookie);
+    print_green("cookie waited\n");
     dm_task_destroy(dmt);
+    print_green("dmt destroyed\n");
 
     /* Clean the key. */
     memset(param, 0, 4096);

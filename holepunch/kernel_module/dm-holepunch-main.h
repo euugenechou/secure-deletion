@@ -28,6 +28,7 @@
 #include <linux/netlink.h>
 /* #include <net/genetlink.h> */
 #include <linux/skbuff.h>
+#include <linux/wait.h>
 
 #include "pprf-tree.h"
 
@@ -323,6 +324,9 @@ struct eraser_dev {
 	/* Work queues. */
 	struct workqueue_struct *io_queue;
 	struct workqueue_struct *unlink_queue;
+
+	atomic_t shutdown;
+	atomic_t jobs;
 
 	/* Memory pools. */
 	struct bio_set *bioset;
