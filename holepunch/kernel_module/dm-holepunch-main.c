@@ -23,6 +23,39 @@
 
 #include "dm-holepunch-main.h"
 
+#ifdef HOLEPUNCH_DEBUG
+#include "linux/moduleparam.h"
+unsigned killcode = (unsigned) -1;
+module_param(killcode, uint, S_IWUSR | S_IRUSR);
+// module_param_de(killcode, "used for crash consistency testing");
+#endif
+
+void hp_dbg_die(struct eraser_dev *rd) 
+{
+#ifdef HOLEPUNCH_DEBUG
+	if (killcode == rd->state)
+		panic("crash triggered: state %u", rd->state);
+#endif
+}
+
+void hp_dbg_setstate(struct eraser_dev *rd, unsigned state)
+{
+#ifdef HOLEPUNCH_DEBUG
+		rd->state = state;
+#endif
+}
+
+void hp_dbg_incrstate_die(struct eraser_dev *rd, const char* msg)
+{
+#ifdef HOLEPUNCH_DEBUG
+	++rd->state;
+	if (msg)
+		DMINFO("%s :: %u", msg, rd->state);
+	hp_dbg_die(rd);
+#endif
+}
+
+
 /* Decodes a hex encoded byte string. */
 static u8 *eraser_hex_decode(u8 *hex)
 {
@@ -418,7 +451,8 @@ static void *__eraser_rw_sector(struct block_device *bdev, u64 sector,
 		p = virt_to_page(write_buf);
 		bio->bi_rw |= REQ_WRITE;
 	}
-
+	if (rd->state == 111)
+	 	DMINFO(" ?? page %p  write buf %p", p, write_buf);
 	bio_add_page(bio, p, ERASER_SECTOR, 0);
 
 	submit_bio_wait(0, bio);
@@ -508,7 +542,7 @@ static inline u8 *holepunch_pprf_sector_key(struct eraser_dev *rd, u64 index)
 		.key;
 }
 
-/* Assumes that the master key is loaded (from TPM or elsewhere)
+/* Assumes that the master key is in memory (from TPM or elsewhere)
  * rd->pprf_fkt must be allocated before calling this.
  * Reads+decrypts the FKT from disk.
  */
@@ -520,6 +554,8 @@ static void holepunch_read_fkt(struct eraser_dev *rd)
 
 	p = eraser_allocate_page(rd);
 	data = kmap(p);
+
+	dump_key(rd->master_key, "READING PPRF FKT WITH MASTER KEY:");
 
 	for (s = 0; s != rd->hp_h->fkt_top_width; ++s)
 	{
@@ -541,14 +577,23 @@ static void holepunch_read_fkt(struct eraser_dev *rd)
 	eraser_free_page(p, rd);
 }
 
-/* Assumes that the FKT is in memory, and that rd->pprf_key is allocated
+/* Assumes that the FKT is in memory
+ * Will allocate rd->pprf_key if not already allocated
  * Reads+decrypts the PPRF key from disk. 
  */
-static void holepunch_read_pprf(struct eraser_dev *rd)
+static int holepunch_read_pprf(struct eraser_dev *rd)
 {
 	void *data;
 	struct page *p;
 	u64 s;
+
+	if (!rd->pprf_key) {
+		rd->pprf_key_capacity = round_up(2 * holepunch_pprf_size_get(rd), HP_PPRF_PER_SECTOR);
+		DMINFO("Allocating %lu bytes for PPRF", rd->pprf_key_capacity * sizeof(struct pprf_keynode));
+		rd->pprf_key = vmalloc(rd->pprf_key_capacity * sizeof(struct pprf_keynode));
+		if (!rd->pprf_key) 
+			return 1;
+	}
 
 	p = eraser_allocate_page(rd);
 	data = kmap(p);
@@ -565,6 +610,8 @@ static void holepunch_read_pprf(struct eraser_dev *rd)
 
 	kunmap(p);
 	eraser_free_page(p, rd);
+
+	return 0;
 }
 
 /* PPRF read lock outside. */
@@ -589,6 +636,15 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 
 #ifdef HOLEPUNCH_JOURNAL
 /* Replay the journal. */
+
+static inline void holepunch_journal_write_control(struct eraser_dev *rd,
+	void* buf)
+{
+	hp_dbg_incrstate_die(rd, "write ctl jnl entry");
+	eraser_write_sector(rd->hp_h->journal_start, buf, rd);
+	hp_dbg_incrstate_die(rd, "write ctl jnl exit");
+} 
+
 static void holepunch_journal_replay(struct eraser_dev *rd)
 {
 	void *blk;
@@ -602,10 +658,13 @@ static void holepunch_journal_replay(struct eraser_dev *rd)
 	{
 		if (rd->journal[i] == rd->hp_h->journal_start)
 			break;
+		hp_dbg_incrstate_die(rd, "replay loop");
+
 		// TODO doing this all sequentially seems very inefficient
+		KWORKERMSG("JOURNAL REPLAY: %llu -> %llu\n", 
+				rd->hp_h->journal_start + i, rd->journal[i]);
 		eraser_read_sector(rd->hp_h->journal_start + i, blk, rd);
 		eraser_write_sector(rd->journal[i], blk, rd);
-		// eraser_free_sector(blk, rd);
 	}
 
 	kunmap(p);
@@ -619,13 +678,21 @@ static void holepunch_journal_commit(struct eraser_dev *rd)
 		return;
 	if (rd->journal_entry < HP_JOURNAL_LEN)
 		rd->journal[rd->journal_entry] = rd->hp_h->journal_start;
-	eraser_write_sector(rd->hp_h->journal_start, rd->journal, rd);
+	hp_dbg_incrstate_die(rd, "jnl commit entry");
+
+
+	holepunch_journal_write_control(rd, rd->journal);
+
+	/* journal entry committed - now actually perform the transaction */
 	holepunch_journal_replay(rd);
 	rd->journal[0] = HPJ_NONE;
-	eraser_write_sector(rd->hp_h->journal_start, rd->journal, rd);
+	holepunch_journal_write_control(rd, rd->journal);
 
 	eraser_free_sector(rd->journal, rd);
 	rd->journal = NULL;
+
+	hp_dbg_incrstate_die(rd, "jnl commit exit");
+
 }
 
 
@@ -635,7 +702,8 @@ static void holepunch_journal_commit(struct eraser_dev *rd)
  * commits and starts over; if this behavior isn't desired, use
  * rd->journal_entry and holepunch_journal_commit manually.
  */
-static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data)
+static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data,
+		unsigned hpj_ty)
 {
 	struct page *p;
 	int i;
@@ -645,9 +713,11 @@ static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data)
 	{
 		p = eraser_allocate_page(rd);
 		rd->journal = kmap(p);
-		rd->journal[0] = HPJ_GENERIC;
+		rd->journal[0] = hpj_ty;
 		rd->journal_entry = 1;
 	}
+	if (rd->journal)
+		DMINFO("Journal state on write entry: %llu\n", rd->journal[0]);
 	for (i = 1; i < rd->journal_entry; ++i)
 	{
 		if (rd->journal[i] == addr)
@@ -656,6 +726,8 @@ static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data)
 	rd->journal[i] = addr;
 	eraser_write_sector(rd->hp_h->journal_start + i, data, rd);
 	rd->journal_entry++;
+	hp_dbg_incrstate_die(rd, "jnl write exit");
+
 }
 
 
@@ -672,25 +744,36 @@ static void holepunch_rotate_master(struct eraser_dev *rd)
 	p2 = eraser_allocate_page(rd);
 	ctl = kmap(p1);
 	blk = kmap(p2);
+	
+	hp_dbg_incrstate_die(rd, "rotate master jnl entry");
+
+	dump_key(new_key, "WRITING (journal) PPRF FKT WITH NEW MASTER KEY:");
 
 	*(u64 *)ctl = HPJ_MASTER_ROT;
 	holepunch_ecb(rd, ctl + 8, new_key, ERASER_KEY_LEN, ERASER_ENCRYPT, rd->master_key);
 	holepunch_hash(rd, rd->master_key, ERASER_KEY_LEN, ctl + 8 + ERASER_KEY_LEN);
 	for (i = 0; i < rd->hp_h->fkt_top_width; ++i)
 	{
+		hp_dbg_incrstate_die(rd, "rotate master jnl fkt top");
+
 		holepunch_cbc_sector(rd, blk, rd->pprf_fkt + i, ERASER_ENCRYPT, new_key,
 				rd->hp_h->fkt_start + i);
 		eraser_write_sector(rd->hp_h->journal_start + i + 1, blk, rd);
 	}
-	eraser_write_sector(rd->hp_h->journal_start, ctl, rd);
+	holepunch_journal_write_control(rd, ctl);
 	holepunch_do_master_rotation(rd, new_key);
+	dump_key(rd->master_key, "\nRotated Master key\n");
 	*(u64 *)ctl = HPJ_NONE;
-	eraser_write_sector(rd->hp_h->journal_start, ctl, rd);
+	holepunch_journal_write_control(rd, ctl);
+
 
 	kunmap(p1);
 	kunmap(p2);
 	eraser_free_page(p1, rd);
 	eraser_free_page(p2, rd);
+
+	hp_dbg_incrstate_die(rd, "rotate master jnl exit");
+
 }
 
 /* Perform the (post-journaling) steps necessary to rotate the master key. */
@@ -703,10 +786,15 @@ static void holepunch_do_master_rotation(struct eraser_dev *rd, void *new_key)
 	p = eraser_allocate_page(rd);
 	blk = kmap(p);
 	
+	hp_dbg_incrstate_die(rd, "master rotation entry");
+
+
 	for (i = 0; i < rd->hp_h->fkt_top_width; ++i)
 	{
 		// TODO again, this feels a little silly to allocate and free for each
 		// block, and also to wait for each bio individually
+		hp_dbg_incrstate_die(rd, "master rotation transfer fkt top");
+
 		eraser_read_sector(rd->hp_h->journal_start + i + 1, blk, rd);
 		eraser_write_sector(rd->hp_h->fkt_start, blk, rd);
 		// eraser_free_sector(blk, rd);
@@ -716,6 +804,7 @@ static void holepunch_do_master_rotation(struct eraser_dev *rd, void *new_key)
 	kunmap(p);
 	eraser_free_page(p, rd);
 
+	hp_dbg_incrstate_die(rd, "master rotation exit");
 }
 
 /* Journal, then complete, a pprf key rotation. 
@@ -735,10 +824,13 @@ static void holepunch_rotate_pprf(struct eraser_dev *rd)
 	/* PPRF rotation and journal clear. */
 	ctl[0] = HPJ_PPRF_ROT;
 	holepunch_ecb(rd, ctl + 1, new_key, ERASER_KEY_LEN, ERASER_ENCRYPT, rd->master_key);
-	eraser_write_sector(rd->hp_h->journal_start, ctl, rd);
+	holepunch_journal_write_control(rd, ctl);
+
+
+	// rd->state = 24;
 	holepunch_do_pprf_rotation(rd, new_key, 0);
 	ctl[0] = HPJ_NONE;
-	eraser_write_sector(rd->hp_h->journal_start, ctl, rd);
+	holepunch_journal_write_control(rd, ctl);
 
 	kunmap(p);
 	eraser_free_page(p, rd);
@@ -761,7 +853,8 @@ static void holepunch_journal_commit(struct eraser_dev *rd)
 	return;
 }
 
-static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data)
+static void holepunch_journal_write(struct eraser_dev *rd, u64 addr, void *data,
+		unsigned hpj_ty)
 {
 	return;
 }
@@ -821,6 +914,9 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 	cipher = kmap(cp);
 	new.type = PPRF_KEYLEAF;
 	memcpy(new.v.key, new_key, ERASER_KEY_LEN);
+#ifdef HOLEPUNCH_DEBUG
+	new.lbl.depth = 0;
+#endif
 	/* Loop over the filekey table, decrypting with new key until magic is wrong. */
 	for (s = rd->hp_h->key_table_start; s != rd->hp_h->fkt_start; ++s)
 	{
@@ -856,6 +952,7 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 #ifdef HOLEPUNCH_DEBUG
 	DMINFO("Done with key transition, moving to FKT.");
 #endif
+	hp_dbg_die(rd);
 	/* Setup AES-CTR instance, then reset FKT. */
 	kernel_random(key, ERASER_KEY_LEN);
 	crypto_blkcipher_setkey(rd->ctr_tfm, key, ERASER_KEY_LEN);
@@ -873,19 +970,22 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 			holepunch_cbc_sector_inplace(rd, rd->pprf_fkt + s, ERASER_ENCRYPT,
 					rd->master_key, rd->hp_h->fkt_start + s);
 		}
-		// DMINFO("- %llu %p", rd->hp_h->fkt_start + s, rd->pprf_fkt+s);
-		eraser_write_sector(rd->hp_h->fkt_start + s, rd->pprf_fkt + s, rd);
-		DMINFO("--");
+		memcpy(cipher, rd->pprf_fkt+s, ERASER_SECTOR);
+		eraser_write_sector(rd->hp_h->fkt_start + s, cipher, rd);
 		holepunch_cbc_sector_inplace(rd, rd->pprf_fkt + s, ERASER_DECRYPT,
 				rd->master_key, rd->hp_h->fkt_start + s);
 	}
+
 	/* Bottom level FKT sectors */
+#ifdef HOLEPUNCH_DEBUG
+	DMINFO("Bottom level FKT sectors.");
+#endif
 	for (; s != rd->fkt_len; ++s)
 	{
 		__holepunch_blkcipher(rd->pprf_fkt + s, rd->pprf_fkt + s, ERASER_SECTOR,
 				ERASER_ENCRYPT, rd->ctr_tfm);
-		DMINFO("----");
-		eraser_write_sector(rd->hp_h->fkt_start + s, rd->pprf_fkt + s, rd);
+		memcpy(cipher, rd->pprf_fkt+s, ERASER_SECTOR);
+		eraser_write_sector(rd->hp_h->fkt_start + s, cipher, rd);
 		holepunch_cbc_sector_inplace(rd, rd->pprf_fkt + s, ERASER_DECRYPT,
 				holepunch_fkt_bottom_key(rd, s - rd->hp_h->fkt_top_width),
 				rd->hp_h->fkt_start + s);
@@ -1328,17 +1428,21 @@ static void holepunch_write_key_table_sector(struct eraser_dev *rd,
 	u8 key[PRG_INPUT_LEN];
 	u64 sectorno = rd->hp_h->key_table_start + index;
 
+	hp_dbg_incrstate_die(rd, "write key table jnl entry");
+
 	p = eraser_allocate_page(rd);
 	data = kmap(p);
 	holepunch_evaluate_at_tag(rd, sector->tag, key, rd->pprf_key);
 	holepunch_cbc_filekey_sector(rd, data, sector, ERASER_ENCRYPT, key, sectorno);
 #ifdef HOLEPUNCH_JOURNAL
-	holepunch_journal_write(rd, sectorno, data);
+	holepunch_journal_write(rd, sectorno, data, HPJ_PPRF_PUNCT);
 #else
 	eraser_write_sector(sectorno, data, rd);
 #endif
 	kunmap(p);
 	eraser_free_page(p, rd);
+
+	hp_dbg_incrstate_die(rd, "write key table jnl exit");
 }
 
 static void holepunch_write_fkt_bottom_sector(struct eraser_dev *rd,
@@ -1348,11 +1452,13 @@ static void holepunch_write_fkt_bottom_sector(struct eraser_dev *rd,
 	u8 *key = holepunch_fkt_bottom_key(rd, index);
 	kernel_random(key, ERASER_KEY_LEN);
 
+	hp_dbg_incrstate_die(rd, "write fkt bot jnl entry");
+
 	sectorno = rd->hp_h->fkt_start + index / HP_FKT_PER_SECTOR;
 	holepunch_cbc_sector(rd, map, rd->pprf_fkt + index / HP_FKT_PER_SECTOR,
 			ERASER_ENCRYPT, rd->master_key, sectorno);
 #ifdef HOLEPUNCH_JOURNAL
-	holepunch_journal_write(rd, sectorno, map);
+	holepunch_journal_write(rd, sectorno, map, HPJ_PPRF_PUNCT);
 #else
 	eraser_write_sector(sectorno, map, rd);
 #endif
@@ -1361,10 +1467,12 @@ static void holepunch_write_fkt_bottom_sector(struct eraser_dev *rd,
 	holepunch_cbc_sector(rd, map, rd->pprf_fkt + rd->hp_h->fkt_top_width + index,
 			ERASER_ENCRYPT, key, sectorno);
 #ifdef HOLEPUNCH_JOURNAL
-	holepunch_journal_write(rd, sectorno, map);
+	holepunch_journal_write(rd, sectorno, map, HPJ_PPRF_PUNCT);
 #else
 	eraser_write_sector(sectorno, map, rd);
 #endif
+	hp_dbg_incrstate_die(rd, "write fkt bot jnl exit");
+
 }
  
 static void holepunch_write_pprf_key_sector(struct eraser_dev *rd, 
@@ -1372,6 +1480,9 @@ static void holepunch_write_pprf_key_sector(struct eraser_dev *rd,
 {	
 	u64 sectorno;
 	u8 *key = holepunch_pprf_sector_key(rd, index);
+
+	hp_dbg_incrstate_die(rd, "write pprf jnl entry");
+	
 	if (fkt_refresh)
 	{
 		kernel_random(key, ERASER_KEY_LEN);
@@ -1382,10 +1493,12 @@ static void holepunch_write_pprf_key_sector(struct eraser_dev *rd,
 	holepunch_cbc_sector(rd, map, rd->pprf_key + index * HP_PPRF_PER_SECTOR,
 			ERASER_ENCRYPT, key, sectorno);
 #ifdef HOLEPUNCH_JOURNAL
-	holepunch_journal_write(rd, sectorno, map);
+	holepunch_journal_write(rd, sectorno, map, HPJ_PPRF_PUNCT);
 #else
 	eraser_write_sector(sectorno, map, rd);
 #endif
+	hp_dbg_incrstate_die(rd, "write pprf jnl exit");
+
 }
 
 
@@ -1460,11 +1573,13 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 			   punctured_index, start_index, end_index);
 	KWORKERMSG("PPRF keynode sectors touched: %u %u %u\n",
 			   punctured_sector, start_sector, end_sector);
-	// print_pprf(rd->pprf_key, rd->hp_h->pprf_size);
+	print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
 #endif
 	/* Persists new crypto information to disk */
 	p = eraser_allocate_page(rd);
 	map = kmap(p);
+	rd->state = 300;
+	
 
 	holepunch_write_pprf_key_sector(rd, punctured_sector, map, true);
 	if (start_sector > punctured_sector)
@@ -1476,12 +1591,24 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	}
 	kunmap(p);
 	eraser_free_page(p, rd);
+
+	DMINFO("AFTER WRITING KEY SECTORS\n");
+	// print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
+
+
 	holepunch_write_key_table_sector(rd, c->map, c->sector);
 	c->status = 0;
-	holepunch_journal_write(rd, 0, rd->hp_h);
+	holepunch_journal_write(rd, 0, rd->hp_h, HPJ_PPRF_PUNCT);
+
+	DMINFO("JUST BEFORE COMMIT\n");
+	// if (rd->pprf_key)
+	// 	print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
+
 	holepunch_journal_commit(rd);
 	HP_UP_WRITE(&rd->pprf_sem, "PPRF: persist unlink");
+	rd->state = 500;
 	holepunch_rotate_master(rd);
+
 #ifdef HOLEPUNCH_DEBUG
 	KWORKERMSG("Persist successful\n");
 #endif
@@ -1493,6 +1620,7 @@ static void holepunch_do_unlink(struct work_struct *work)
 	struct eraser_map_cache *c;
 	struct semaphore *cache_lock;
 	struct eraser_unlink_work *w = container_of(work, struct eraser_unlink_work, work);
+	
 	c = holepunch_get_cache_entry(w->rd, w->ino, &cache_lock);
 	kernel_random(c->map->entries[w->ino % HP_KEY_PER_SECTOR].key, ERASER_KEY_LEN);
 	c->status = ERASER_CACHE_DIRTY;
@@ -1736,6 +1864,24 @@ static void eraser_netlink_recv(struct sk_buff *skb_in)
 // TODO this could be simpler (one netlink send function too)
 static void holepunch_tpm_set_master(struct eraser_dev *rd, u8 *new_key)
 {
+#ifdef HOLEPUNCH_DEBUG
+	u8 buf[3*ERASER_KEY_LEN+1];
+	unsigned j;
+
+	for (j = 0; j < ERASER_KEY_LEN; ++j) {
+		sprintf(buf + 3*j, "%02hhx ", rd->master_key[j]);
+	}
+	buf[3*ERASER_KEY_LEN-1] = 0;
+	DMINFO("OLD MASTER KEY: %s", buf);
+
+	for (j = 0; j < ERASER_KEY_LEN; ++j) {
+		sprintf(buf + 3*j, "%02hhx ", new_key[j]);
+	}
+	buf[3*ERASER_KEY_LEN-1] = 0;
+	DMINFO("NEW MASTER KEY: %s", buf);
+
+#endif
+	hp_dbg_incrstate_die(rd, "before set tpm");
 	memcpy(rd->new_master_key, new_key, ERASER_KEY_LEN);
 	__set_bit(ERASER_KEY_SET_REQUESTED, &rd->master_key_status);
 	while (eraser_set_master_key(rd))
@@ -1743,11 +1889,15 @@ static void holepunch_tpm_set_master(struct eraser_dev *rd, u8 *new_key)
 		msleep(100);
 	}
 	msleep(10);
+	hp_dbg_incrstate_die(rd, "waiting for tpm reply");
+
 	while (!test_and_clear_bit(ERASER_KEY_READY_TO_REFRESH, &rd->master_key_status))
 	{
 		wait_for_completion_timeout(&rd->master_key_wait, 1 * HZ);
 	}
 	memcpy(rd->master_key, rd->new_master_key, ERASER_KEY_LEN);
+	hp_dbg_incrstate_die(rd, "after set tpm");
+
 }
 
 static struct netlink_kernel_cfg eraser_netlink_cfg =
@@ -2011,15 +2161,54 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	rd->map_cache_count = 0;
 
+#ifdef HOLEPUNCH_DEBUG
+	rd->state = 0;
+	rd->die = 0;
+#endif
+
+	/* Journal recovery, if necessary. */
+	rd->journal_entry = 0;
+	rd->journal = eraser_read_sector(rd->hp_h->journal_start, NULL, rd);
+	DMINFO("Journal state: %llu\n", rd->journal[0]);
+	
+	
 	/* PPRF key and FKT. */
 	DMINFO("Allocating %llu bytes for FKT", rd->fkt_len*ERASER_SECTOR);
 	rd->pprf_fkt = vmalloc(rd->fkt_len * ERASER_SECTOR);
-	if (!rd->pprf_fkt)
-	{
+	if (!rd->pprf_fkt) {
 		ti->error = "Could not allocate pprf fkt.";
 		goto alloc_pprf_fkt_fail;
 	}
+
+	switch(rd->journal[0])
+	{
+		case HPJ_MASTER_ROT:
+			goto skip_pprf_load;
+	}
+	
 	holepunch_read_fkt(rd);
+	holepunch_dump_fkt(rd);
+
+
+	if (likely(rd->hp_h->in_use)) {
+		rd->pprf_key_capacity = round_up(2 * holepunch_pprf_size_get(rd), HP_PPRF_PER_SECTOR);
+	} else {
+		rd->pprf_key_capacity = HP_PPRF_PER_SECTOR;
+	}
+	DMINFO("Allocating %lu bytes for PPRF", rd->pprf_key_capacity * sizeof(struct pprf_keynode));
+	rd->pprf_key = vmalloc(rd->pprf_key_capacity * sizeof(struct pprf_keynode));
+	if (!rd->pprf_key) {
+		ti->error = "Could not allocate pprf key.";
+		goto alloc_pprf_key_fail;
+	}
+
+	switch(rd->journal[0])
+	{
+		case HPJ_PPRF_INIT:
+		case HPJ_PPRF_ROT:
+			goto skip_pprf_load;
+	}
+
 	
 	if (likely(rd->hp_h->in_use)) {
 		rd->pprf_key_capacity = round_up(2 * holepunch_pprf_size_get(rd), HP_PPRF_PER_SECTOR);
@@ -2028,21 +2217,22 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	DMINFO("Allocating %lu bytes for PPRF", rd->pprf_key_capacity * sizeof(struct pprf_keynode));
 	rd->pprf_key = vmalloc(rd->pprf_key_capacity * sizeof(struct pprf_keynode));
-	if (!rd->pprf_key)
-	{
+	if (!rd->pprf_key) {
 		ti->error = "Could not allocate pprf key.";
 		goto alloc_pprf_key_fail;
 	}
 	if (likely(rd->hp_h->in_use)) {
 		holepunch_read_pprf(rd);
+		// DMINFO("PPRF state before crash recovery\n");
+		// print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
 	} else {
 		rd->pprf_key->type = PPRF_KEYLEAF;
 		// memset(rd->pprf_key->v.key, 0, PRG_INPUT_LEN);
 	}
 
-	/* Journal recovery, if necessary. */
-	rd->journal_entry = 0;
-	rd->journal = eraser_read_sector(rd->hp_h->journal_start, NULL, rd);
+skip_pprf_load:
+
+
 	switch (rd->journal[0])
 	{
 	case HPJ_NONE:
@@ -2054,46 +2244,64 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		{
 			/* TPM still contains old key. */
 			holepunch_ecb(rd, new_key, rd->journal + 1, ERASER_KEY_LEN,
-						  ERASER_DECRYPT, rd->master_key);
+					ERASER_DECRYPT, rd->master_key);
 			holepunch_do_master_rotation(rd, new_key);
 		}
-		goto journal_clear;
+		goto read_fkt;
 	case HPJ_PPRF_ROT:
 		DMINFO("Recovering PPRF key rotation");
+		holepunch_ecb(rd, new_key, rd->journal + 1, ERASER_KEY_LEN,
+					ERASER_DECRYPT, rd->master_key);
 		holepunch_do_pprf_rotation(rd, new_key, 0);
-		need_master_rot = 1;
-		goto journal_clear;
+		holepunch_rotate_master(rd);
+		goto journal_pprf_finish;
 	case HPJ_PPRF_INIT:
 		DMINFO("Recovering PPRF key initialization");
 		kernel_random(new_key, ERASER_KEY_LEN);
 		holepunch_do_pprf_rotation(rd, new_key, 1);
-		goto journal_clear;
+		holepunch_rotate_master(rd);
+		goto journal_pprf_finish;
+	case HPJ_PPRF_PUNCT:
+		DMINFO("Recovering journalled puncture");
+		holepunch_journal_replay(rd);
+		goto read_fkt;
 	case HPJ_GENERIC:
 		DMINFO("Recovering journalled write");
 		holepunch_journal_replay(rd);
 		goto journal_clear;
 	default:
 		DMWARN("Invalid journal control type; ignoring");
+	journal_pprf_finish:
+		/* this is needed so the FKT is updated with the correct counts */
+		holepunch_rotate_master(rd);
+		goto read_pprf;
+	read_fkt:
+		holepunch_read_fkt(rd);
+	read_pprf:
+		if (holepunch_read_pprf(rd)) {
+			ti->error = "Could not allocate pprf key.";
+			goto alloc_pprf_key_fail;
+		}
 	journal_clear:
 		rd->journal[0] = HPJ_NONE;
 		eraser_write_sector(rd->hp_h->journal_start, rd->journal, rd);
+		// DMINFO("\nPPRF state after rotation/initialization\n");
+		// print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
 		break;
 	}
 	eraser_free_sector(rd->journal, rd);
 	rd->journal = NULL;
 
 	/* Rotate master key if there was a non-journalled crash. */
-	if (unlikely(rd->hp_h->in_use))
-	{
+	if (unlikely(rd->hp_h->in_use))	{
+		// DMINFO("want to rotate master\n");
 		need_master_rot = 1;
-	}
-	else
-	{
+	} else {
 		rd->hp_h->in_use = 1;
 		holepunch_write_header(rd);
 	}
-	if (need_master_rot)
-	{
+	if (need_master_rot) {
+		DMINFO("Rotating master on crash recovery\n");
 		holepunch_rotate_master(rd);
 	}
 
@@ -2122,6 +2330,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	dump_key(rd->master_key, "Master key");
 	dump_key(rd->sec_key, "Sector key");
 	dump_key(rd->hp_h->iv_key, "IV key");
+	print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
 	DMINFO("Construction complete");
 #endif
 	return 0;
@@ -2227,6 +2436,10 @@ static void eraser_dtr(struct dm_target *ti)
 	holepunch_write_header(rd);
 	eraser_free_sector(rd->hp_h, rd);
 
+	DMINFO("DEBUG: check keys on destroy");
+	holepunch_dump_fkt(rd);
+	print_pprf(rd->pprf_key, holepunch_pprf_size_get(rd));
+
 	vfree(rd->pprf_key);
 	vfree(rd->pprf_fkt);
 
@@ -2287,6 +2500,7 @@ static struct target_type eraser_target = {
 	.io_hints = eraser_io_hints,
 };
 
+
 static void config_messages(void)
 {
 #ifdef HOLEPUNCH_BATCHING
@@ -2294,14 +2508,21 @@ static void config_messages(void)
 #else
 	DMINFO("Batching disabled");
 #endif
+#ifdef HOLEPUNCH_JOURNAL
+	DMINFO("Journaling enabled");
+#else
+	DMINFO("Journaling disabled");
+#endif
 #ifdef HOLEPUNCH_DEBUG
 	DMINFO("HOLEPUNCH compiled in debug mode");
+	DMINFO("KILLCODE = %u", killcode);
 #endif
 	DMINFO("HP_PPRF_PER_SECTOR: %lu (%lu)", HP_PPRF_PER_SECTOR, 
 			sizeof(struct pprf_keynode));
 	DMINFO("HP_FKT_PER_SECTOR: %d", HP_FKT_PER_SECTOR);
 	DMINFO("HP_KEY_PER_SECTOR: %d", HP_KEY_PER_SECTOR);
 }
+
 
 /* Module entry. */
 static int __init dm_eraser_init(void)

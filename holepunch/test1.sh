@@ -12,7 +12,9 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=20000
+numfiles=400
+
+echo "Numfiles = " $numfiles
 
 for ((i=0; i<$numfiles; i++))
 do
@@ -23,7 +25,6 @@ done
 
 sync
 echo "1" > /proc/sys/vm/drop_caches
-ls
 
 for ((i=0; i<$numfiles-2; i++))
 do

@@ -209,45 +209,43 @@ struct holepunch_header {
  * journal entry; further contents are determined by the type:
  */
 
-/* No active journal entry. */
-#define HPJ_NONE 0UL
-
-/*
- * Master key rotation. Following the type is the new master key, encrypted by
- * the old master key, followed by the hash of the old key. Recovery proceeds
- * by comparing the hash of the current master key to the stored hash. If they
- * match, pprf_fkt_top_width blocks should be copied from the journal to
- * pprf_fkt_start in sequence, then the new key written to the TPM (obtained
- * via decrypting the on-disc version), and finally the journal cleared. If they
- * don't match, the journal can simply be cleared.
- */
-#define HPJ_MASTER_ROT 1UL
-
-/*
- * PPRF key rotation. Following the type is the new PPRF key encrypted by the
- * master key. Recovery includes walking the key table, decrypting each under
- * the new PPRF until a magic byte mismatch, then switching to the on-disk PPRF.
- * This process also includes resetting the tags and re-encrypting under the new
- * PPRF. Following that, the FKT is filled with random bytes (via AES-CTR) and
- * synced in memory, and the new PPRF key is written. Finally, tag_counter and
- * pprf_key_size are reset and a master key rotation is scheduled.
- */
-#define HPJ_PPRF_ROT 2UL
-
-/*
- * PPRF key initialization. Everything is the same as above, except magic bytes
- * are ignored and simply reset instead.
- */
-#define HPJ_PPRF_INIT 3UL
-
-/*
- * Generic multi-block atomic write. The type is followed by up to 63 64-bit
- * block addresses. Recovery proceeds by writing each block in the journal to
- * its address (specified in the control block), then clearing the journal. An
- * address corresponding to the control block indicates the end of valid
- * addresses.
- */
-#define HPJ_GENERIC 4UL
+enum {
+	/* No active journal entry. */
+	HPJ_NONE = 0,
+	/* Master key rotation. Following the type is the new master key, encrypted by
+	 * the old master key, followed by the hash of the old key. Recovery proceeds
+	 * by comparing the hash of the current master key to the stored hash. If they
+	 * match, pprf_fkt_top_width blocks should be copied from the journal to
+	 * pprf_fkt_start in sequence, then the new key written to the TPM (obtained
+	 * via decrypting the on-disc version), and finally the journal cleared. If they
+	 * don't match, the journal can simply be cleared.
+	 */
+	HPJ_MASTER_ROT,
+	/* PPRF key rotation. Following the type is the new PPRF key encrypted by the
+	 * master key. Recovery includes walking the key table, decrypting each under
+	 * the new PPRF until a magic byte mismatch, then switching to the on-disk PPRF.
+	 * This process also includes resetting the tags and re-encrypting under the new
+	 * PPRF. Following that, the FKT is filled with random bytes (via AES-CTR) and
+	 * synced in memory, and the new PPRF key is written. Finally, tag_counter and
+	 * pprf_key_size are reset and a master key rotation is scheduled.
+	 */
+	HPJ_PPRF_ROT, 
+	/*
+	 * PPRF key initialization. Everything is the same as above, except magic bytes
+	 * are ignored and simply reset instead.
+	 */
+	HPJ_PPRF_INIT,
+	/* */
+	HPJ_PPRF_PUNCT,
+	/*
+	 * Generic multi-block atomic write. The type is followed by up to 63 64-bit
+	 * block addresses. Recovery proceeds by writing each block in the journal to
+	 * its address (specified in the control block), then clearing the journal. An
+	 * address corresponding to the control block indicates the end of valid
+	 * addresses.
+	 */
+	HPJ_GENERIC
+};
 
 
 /*
@@ -291,7 +289,7 @@ struct eraser_dev {
 	struct completion master_key_wait;
 	unsigned long master_key_status;   /* Key status flags. */
 	int helper_pid;                    /* Netlink talks to this pid. */
-	u64 *journal;
+	u64 *journal;					
 	int journal_entry;
 
 	struct holepunch_header *hp_h;
@@ -344,6 +342,10 @@ struct eraser_dev {
 	u64 stats_evaluate;
 	u64 stats_puncture;
 	u64 stats_refresh;
+#ifdef HOLEPUNCH_DEBUG
+	volatile unsigned state;
+	volatile unsigned die;
+#endif
 };
 static LIST_HEAD(eraser_dev_list); /* We keep all ERASERs in a list. */
 static DEFINE_SEMAPHORE(eraser_dev_lock);
@@ -375,4 +377,54 @@ struct eraser_unlink_work {
 /* In seconds. */
 #define ERASER_CACHE_EVICTION_PERIOD 5
 
+
+// #pragma GCC push_options
+// #pragma GCC optimize("O0")
+
+
+// #pragma GCC pop_options
+
+void holepunch_dump_fkt(struct eraser_dev *rd) 
+{
+#ifdef HOLEPUNCH_DEBUG
+	unsigned i, j, ent;
+	unsigned len = 3*ERASER_KEY_LEN + 1;
+	char buf[len];
+
+	if (!rd->pprf_fkt) {
+		printk(KERN_INFO "PPRF FKT not loaded\n");
+		return;
+	}
+
+	printk(KERN_INFO "  top fkt level : select keys\n");
+	for (i = 0; i < rd->hp_h->fkt_top_width; ++i) {
+		for (ent = 0; ent < 3; ++ent) {
+			for (j = 0; j < ERASER_KEY_LEN; ++j) {
+				sprintf(buf + 3*j, "%02hhx ", rd->pprf_fkt[i].entries[0].key[j]);
+			}
+			buf[len-1] = 0;
+			printk(KERN_INFO "%u: %s\n", ent, buf);
+		}
+	}
+
+	printk(KERN_INFO "  bottom fkt level : select keys\n");
+	for (; i < rd->hp_h->fkt_top_width + rd->hp_h->fkt_bottom_width; ++i) {
+		for (j = 0; j < ERASER_KEY_LEN; ++j) {
+			sprintf(buf + 3*j, "%02hhx ", rd->pprf_fkt[i].entries[0].key[j]);
+		}
+		buf[len-1] = 0;
+		printk(KERN_INFO "--%llu,0: %s\n", i-rd->hp_h->fkt_top_width, buf);
+
+		for (j = 0; j < ERASER_KEY_LEN; ++j) {
+			sprintf(buf + 3*j, "%02hhx ", rd->pprf_fkt[i].entries[HP_FKT_PER_SECTOR-1].key[j]);
+		}
+		buf[len-1] = 0;
+		printk(KERN_INFO "--%llu,%u: %s\n", i-rd->hp_h->fkt_top_width, HP_FKT_PER_SECTOR, buf);
+	}
+
 #endif
+}
+
+
+
+#endif 

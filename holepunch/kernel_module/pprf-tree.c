@@ -174,7 +174,7 @@ void label_to_string(struct node_label *lbl, char *node_label)
 		for (i = 0; i < lbl->depth; ++i) {
 			node_label[i] = check_bit_is_set(lbl->label, i) ? '1' : '0';
 		}
-		node_label[i] = 0;
+		node_label[i] = '\0';
 	}
 }
 
@@ -186,26 +186,33 @@ void dump_key(u8 *key, char *name)
 		sprintf(buf + i * 3, "%02hhx ", key[i]);
 	}
 	buf[sizeof(buf) - 1] = '\0';
-	printk(KERN_INFO "%s: %s\n", name, buf);
+	if (name)
+		printk(KERN_INFO "%s: %s\n", name, buf);
+	else
+		printk(KERN_INFO "%s\n", buf);
 }
 
 void print_pprf(struct pprf_keynode *pprf, u32 pprf_size)
 {
 	u32 i;
 	char node_label[MAX_DEPTH + 1];
-	char title[50 + sizeof(node_label)];
+	unsigned len = 80; /* Dangerous */
+	char title[len];
 
 	printk(KERN_INFO "PPRF dump, len %u", pprf_size);
 	for (i = 0; i < pprf_size; ++i) {
 		label_to_string(&pprf[i].lbl, node_label);
 		if (pprf[i].type == PPRF_INTERNAL) {
-			printk(KERN_INFO "index %u label %s: il: %u ir: %u", i, node_label,
-				pprf[i].v.next.il, pprf[i].v.next.ir);
+			printk(KERN_INFO "[I] index %u, il: %u ir: %u\n label %s\n", i,
+				pprf[i].v.next.il, pprf[i].v.next.ir, node_label);
 		} else if (pprf[i].type == PPRF_KEYLEAF) {
-			sprintf(title, "index %u label %s", i, node_label);
+			memset(title, 0, len);
+			sprintf(title, "[K] index %u ", i);
 			dump_key(pprf[i].v.key, title);
+			snprintf(title, len, "label %s", node_label);
+			printk(KERN_INFO "%s", title);
 		} else {
-			printk(KERN_INFO "index %u label %s: punctured", i, node_label);
+			printk(KERN_INFO "[P] index %u\n label %s\n", i, node_label);
 		}
 	}
 }
