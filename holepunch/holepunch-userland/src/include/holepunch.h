@@ -48,7 +48,7 @@
 #define PRG_INPUT_LEN 32
 // The key growth is the PPRF depth times this value
 #define HOLEPUNCH_KEY_GROWTH_MULT  2
-#define HOLEPUNCH_REFRESH_INTERVAL 5
+#define HOLEPUNCH_REFRESH_INTERVAL 2
 
 #define ERASER_CREATE 0
 #define ERASER_OPEN 1

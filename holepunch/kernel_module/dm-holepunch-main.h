@@ -76,48 +76,48 @@
 
 #define KWORKERMSG(msg, arg...) \
 	do { \
-		printk(KERN_INFO "[%u/%u] " msg, task_pid_nr(current), get_cpu(), ## arg); \
+		printk(KERN_INFO "[%u/%u] " msg "\n", task_pid_nr(current), get_cpu(), ## arg); \
 		put_cpu(); \
 	} while (0)
 
 #ifdef HOLEPUNCH_SEMA
 	#define HP_DOWN_WRITE(rwsem, msg, arg...) \
 		do { \
-			KWORKERMSG("TRY write rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("TRY write rwsem: " msg, ## arg); \
 			down_write(rwsem);\
-			KWORKERMSG("GET write rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("GET write rwsem: " msg, ## arg); \
 		} while (0)
 	#define HP_UP_WRITE(rwsem, msg, arg...) \
 		do { \
 			up_write(rwsem);\
-			KWORKERMSG("PUT write rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("PUT write rwsem: " msg, ## arg); \
 		} while (0)
 	#define HP_DOWN_READ(rwsem, msg, arg...) \
 		do { \
-			KWORKERMSG("TRY read rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("TRY read rwsem: " msg, ## arg); \
 			down_read(rwsem);\
-			KWORKERMSG("GET read rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("GET read rwsem: " msg, ## arg); \
 		} while (0)
 	#define HP_UP_READ(rwsem, msg, arg...) \
 		do { \
 			up_read(rwsem);\
-			KWORKERMSG("PUT read rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("PUT read rwsem: " msg, ## arg); \
 		} while (0)
 	#define HP_DOWNGRADE_WRITE(rwsem, msg, arg...) \
 		do { \
 			downgrade_write(rwsem);\
-			KWORKERMSG("DOWNGRADE rwsem: " msg "\n", ## arg); \
+			KWORKERMSG("DOWNGRADE rwsem: " msg, ## arg); \
 		} while (0)
 	#define HP_DOWN(sem, msg, arg...) \
 		do { \
-			KWORKERMSG("TRY sem: " msg "\n", ## arg); \
+			KWORKERMSG("TRY sem: " msg, ## arg); \
 			down(sem);\
-			KWORKERMSG("GET sem: " msg "\n", ## arg); \
+			KWORKERMSG("GET sem: " msg, ## arg); \
 		} while (0)
 	#define HP_UP(sem, msg, arg...) \
 		do { \
 			up(sem);\
-			KWORKERMSG("PUT sem: " msg "\n", ## arg); \
+			KWORKERMSG("PUT sem: " msg, ## arg); \
 		} while (0)
 #else
 	#define HP_DOWN_WRITE(rwsem, msg, arg...) down_write(rwsem)

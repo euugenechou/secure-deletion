@@ -12,7 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=400
+numfiles=4000
 
 echo "Numfiles = " $numfiles
 
@@ -43,6 +43,6 @@ cat "$fname"
 
 cd /mnt
 umount home
-# slneep 0
+# sleep 0
 holepunch close test
 printf "ooo\no" | holepunch open /dev/sdb1 test
