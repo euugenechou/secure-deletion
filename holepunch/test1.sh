@@ -12,7 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=4000
+numfiles=500
 
 echo "Numfiles = " $numfiles
 
@@ -30,19 +30,20 @@ for ((i=0; i<$numfiles-2; i++))
 do
     # sleep 1
     printf -v fname "hello%04d" "$i"
+    echo "$fname"
     printf "Deleting $fname...\n"
     rm "$fname"
 done
 
-# sleep 0
+sleep 60
 ls
 printf -v fname "hello%04d" "$((numfiles - 2))"
 cat "$fname"
 printf -v fname "hello%04d" "$((numfiles - 1))"
 cat "$fname"
 
-cd /mnt
-umount home
+# cd /mnt
+# umount home
 # sleep 0
-holepunch close test
-printf "ooo\no" | holepunch open /dev/sdb1 test
+# holepunch close test
+# printf "ooo\no" | holepunch open /dev/sdb1 test

@@ -629,7 +629,7 @@ static int holepunch_evaluate_at_tag(struct eraser_dev *rd, u64 tag, u8 *out,
 static void holepunch_tpm_set_master(struct eraser_dev *rd, u8 *new_key);
 static void holepunch_do_master_rotation(struct eraser_dev *rd, void *new_key);
 static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
-		int ignore_magic);
+		int ignore_magic, struct semaphore *cache_lock);
 
 
 #ifdef HOLEPUNCH_JOURNAL
@@ -662,7 +662,7 @@ static void holepunch_journal_replay(struct eraser_dev *rd)
 	#ifdef HOLEPUNCH_DEBUG
 		KWORKERMSG("JOURNAL REPLAY: %llu -> %llu\n", 
 				rd->hp_h->journal_start + i, rd->journal[i]);
-	#endif HOLEPUNCH_DEBUG
+	#endif
 		eraser_read_sector(rd->hp_h->journal_start + i, blk, rd);
 		eraser_write_sector(rd->journal[i], blk, rd);
 	}
@@ -811,7 +811,7 @@ static void holepunch_do_master_rotation(struct eraser_dev *rd, void *new_key)
  * Assumes the PPRF write lock is held and the cache is empty.
  * The PPRF read lock is held from outside.
  */
-static void holepunch_rotate_pprf(struct eraser_dev *rd)
+static void holepunch_rotate_pprf(struct eraser_dev *rd, struct semaphore *cache_lock)
 {
 	struct page *p;
 	u64 *ctl;
@@ -828,7 +828,7 @@ static void holepunch_rotate_pprf(struct eraser_dev *rd)
 	holepunch_ecb(rd, ctl + 1, new_key, ERASER_KEY_LEN, ERASER_ENCRYPT, rd->master_key);
 	holepunch_journal_write_control(rd, ctl);
 
-	holepunch_do_pprf_rotation(rd, new_key, 0);
+	holepunch_do_pprf_rotation(rd, new_key, 0, cache_lock);
 	ctl[0] = HPJ_NONE;
 	holepunch_journal_write_control(rd, ctl);
 
@@ -887,30 +887,40 @@ static void holepunch_rotate_master(struct eraser_dev *rd)
 	holepunch_do_master_rotation(rd, new_key);
 }
 
-static void holepunch_rotate_pprf(struct eraser_dev *rd)
+static void holepunch_rotate_pprf(struct eraser_dev *rd, struct semaphore *cache_lock)
 {
 	u8 new_key[ERASER_KEY_LEN];
 	kernel_random(new_key, ERASER_KEY_LEN);
-	holepunch_do_pprf_rotation(rd, new_key, 0);
+	holepunch_do_pprf_rotation(rd, new_key, 0, cache_lock);
 	holepunch_rotate_master(rd);
 }
 
 #endif
 
+static inline void eraser_drop_map_cache(struct eraser_dev *rd, struct eraser_map_cache *c);
+static void eraser_force_evict_map_cache(struct eraser_dev *rd, int puncture);
+static struct eraser_map_cache *holepunch_find_cache_entry(struct eraser_dev *rd,
+		u64 sector, u64 bucket);
+static struct eraser_map_cache *holepunch_read_cache_entry(struct eraser_dev *rd,
+		u64 sector, int ignore_magic);
+static struct eraser_map_cache *holepunch_get_cache_entry(struct eraser_dev *rd,
+		u64 ino, struct semaphore **cache_lock, int ignore_magic);
+
 
 /* Perform the (post-journaling) steps necessary to rotate the pprf key. 
  * new_key is initialized outside. */
 static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
-		int ignore_magic)
+		int ignore_magic, struct semaphore *cache_lock)
 {
 	// TODO this could be more efficient with memoization, since it's all sequential
-	struct pprf_keynode new;
+	// struct pprf_keynode new;
 	struct page *p, *cp;
-	u64 s;
+	u64 s, ino;
 	struct holepunch_filekey_sector *cipher, *plain;
+	struct eraser_map_cache *entry;
+	struct semaphore *other_cache_lock;
 	u8 key[ERASER_KEY_LEN];
 
-	struct eraser_map_cache *entry;
 
 	hp_dbg_incrstate_die(rd, "do pprf rotate: entry");
 
@@ -918,50 +928,75 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 	cp = eraser_allocate_page(rd);
 	plain = kmap(p);
 	cipher = kmap(cp);
-	new.type = PPRF_KEYLEAF;
-	memcpy(new.v.key, new_key, ERASER_KEY_LEN);
+	rd->pprf_key_new.type = PPRF_KEYLEAF;
+	memcpy(rd->pprf_key_new.v.key, new_key, ERASER_KEY_LEN);
 #ifdef HOLEPUNCH_DEBUG
-	new.lbl.depth = 0;
+	rd->pprf_key_new.lbl.depth = 0;
 #endif
-	/* Loop over the filekey table, decrypting with new key until magic is wrong. */
+	KWORKERMSG("START OF ROTATION Cached: %llu", rd->map_cache_count);
+
+	/* Loop over the filekey table, decrypting with new key until magic is wrong, 
+	 * or if the file is in cache. */
 	for (s = rd->hp_h->key_table_start; s != rd->hp_h->fkt_start; ++s)
 	{
 		hp_dbg_incrstate_die(rd, "do pprf rotate: checking magic correct");
-		eraser_read_sector(s, cipher, rd);
-		holepunch_evaluate_at_tag(rd, cipher->tag, key, &new);
-		holepunch_cbc_filekey_sector(rd, plain, cipher, ERASER_DECRYPT, key, s);
-		// entry = holepunch_get_cache_entry(rd, s*HP_KEY_PER_SECTOR, cachelock);
-		// plain = entry->map;
+		/* We call this with ignore_magic = 1 because we want to find the
+		 * sector that has not been reencrypted yet. So we want to bypass
+		 * the checks in get_cache_entry */
+		ino = (s-rd->hp_h->key_table_start)*HP_KEY_PER_SECTOR;
+		entry = holepunch_get_cache_entry(rd, ino, &other_cache_lock, 1);
 		if (unlikely(ignore_magic ||
-				plain->magic1 != HP_MAGIC1 || plain->magic2 != HP_MAGIC2))
+				plain->magic1 != HP_MAGIC1 || plain->magic2 != HP_MAGIC2)) {
+			KWORKERMSG("Incorrect magic.\n");
 			break;
+		}
+
+		eraser_drop_map_cache(rd, entry);
+		entry = NULL;
+		// if (likely(other_cache_lock != cache_lock))
+			HP_UP(other_cache_lock, "REFRESH: Bucket %llu drop entry", bucket);
 	}
-	/* Then switch to: decrypt with old key, encrypt and writeback with new key. */
+	/* Then switch to: decrypt with old key, encrypt and writeback with new key. 
+	 * *entry* should be pointing to a cache entry already */
+	KWORKERMSG("MID OF ROTATION Cached: %llu", rd->map_cache_count);
 	for (; s != rd->hp_h->fkt_start; ++s)
 	{	
-		if ((s)% 100 == 0)
-			hp_dbg_incrstate_die(rd, "do pprf rotate: encrypt and writeback keytable (steps of 100)");
+		if (!entry) {
+			// bucket = s % ERASER_MAP_CACHE_BUCKETS;
+			ino = (s-rd->hp_h->key_table_start)*HP_KEY_PER_SECTOR;
+			entry = holepunch_get_cache_entry(rd, ino, &other_cache_lock, 1);
 
-		eraser_read_sector(s, cipher, rd);
-		holepunch_evaluate_at_tag(rd, cipher->tag, key, rd->pprf_key);
-		holepunch_cbc_filekey_sector(rd, plain, cipher, ERASER_DECRYPT, key, s);
-		plain->tag = s - rd->hp_h->key_table_start;
+		}
+		if ((s)% 1000 == 0)
+			hp_dbg_incrstate_die(rd, "do pprf rotate: encrypt and writeback keytable (steps of 1000)");
+
+		entry->map->tag = s - rd->hp_h->key_table_start;
 		if (unlikely(ignore_magic 
-				|| plain->magic1 != HP_MAGIC1 || plain->magic2 != HP_MAGIC2))
+				|| entry->map->magic1 != HP_MAGIC1 || entry->map->magic2 != HP_MAGIC2))
 		{
 			if (unlikely(!ignore_magic))
 				DMWARN("Bad magic bytes found and reset; inodes %llu-%llu "
 						"may experience data loss",
 						(s - rd->hp_h->key_table_start) * HP_KEY_PER_SECTOR,
 						(s + 1 - rd->hp_h->key_table_start) * HP_KEY_PER_SECTOR - 1);
-			plain->magic1 = HP_MAGIC1;
-			plain->magic2 = HP_MAGIC2;
+			entry->map->magic1 = HP_MAGIC1;
+			entry->map->magic2 = HP_MAGIC2;
 		}
-		holepunch_evaluate_at_tag(rd, plain->tag, key, &new);
-		holepunch_cbc_filekey_sector(rd, cipher, plain, ERASER_ENCRYPT, key, s);
+
+		holepunch_evaluate_at_tag(rd, entry->map->tag, key, &rd->pprf_key_new);
+		holepunch_cbc_filekey_sector(rd, cipher, entry->map, ERASER_ENCRYPT, key, s);
 		eraser_write_sector(s, cipher, rd);
+
+		eraser_drop_map_cache(rd, entry);
+		HP_UP(other_cache_lock, "REFRESH: Bucket %llu drop entry", bucket);
+		entry = NULL;
+		
 	}
 #ifdef HOLEPUNCH_DEBUG
+	down_read(&rd->map_cache_count_sem);
+	KWORKERMSG("\n(Cached: %llu)\n",
+		rd->map_cache_count);
+		up_read(&rd->map_cache_count_sem);
 	DMINFO("Done with key transition, moving to FKT.");
 #endif
 	
@@ -1010,7 +1045,7 @@ static void holepunch_do_pprf_rotation(struct eraser_dev *rd, u8 *new_key,
 	hp_dbg_incrstate_die(rd, "do rotate pprf: write new pprf key");
 
 	memset(rd->pprf_key, 0, ERASER_SECTOR);
-	memcpy(rd->pprf_key, &new, sizeof(new));
+	memcpy(rd->pprf_key, &rd->pprf_key_new, sizeof(rd->pprf_key_new));
 	holepunch_cbc_sector(rd, plain, rd->pprf_key, ERASER_ENCRYPT,
 			holepunch_pprf_sector_key(rd, 0), rd->hp_h->pprf_start);
 	eraser_write_sector(rd->hp_h->pprf_start, plain, rd);
@@ -1056,7 +1091,7 @@ static void eraser_force_evict_map_cache(struct eraser_dev *rd, int puncture)
 	u8 key[ERASER_KEY_LEN];
 #ifdef HOLEPUNCH_DEBUG
 	KWORKERMSG("Force eviction");
-#endif HOLEPUNCH_DEBUG
+#endif 
 	for (i = 0; i < ERASER_MAP_CACHE_BUCKETS; ++i)
 	{
 		down(&rd->cache_lock[i]);
@@ -1084,41 +1119,80 @@ static void eraser_force_evict_map_cache(struct eraser_dev *rd, int puncture)
 	holepunch_journal_commit(rd);
 }
 
-/*
- * Searches the cache for the entry containing the key for this inode; if not
- * found, reads the sector from disk and caches it. Passes the relevant bucket
- * lock to the caller.
- */
-static struct eraser_map_cache *holepunch_get_cache_entry(struct eraser_dev *rd,
-		u64 ino, struct semaphore **cache_lock)
+
+static struct eraser_map_cache *holepunch_find_cache_entry(struct eraser_dev *rd,
+		u64 sector, u64 bucket) 
 {
 	struct eraser_map_cache *c;
-	u64 sector, bucket;
-	u8 key[ERASER_KEY_LEN]; /* If we need to read it */
-	sector = ino / HP_KEY_PER_SECTOR;
-	bucket = sector % ERASER_MAP_CACHE_BUCKETS;
-
-	*cache_lock = &rd->cache_lock[bucket];
-	HP_DOWN(*cache_lock, "Bucket %u get entry", bucket);
-
-	/* Look first */
-	list_for_each_entry(c, &rd->map_cache_list[bucket], list)
-	{
-		if (c->sector == sector)
-		{
+	list_for_each_entry(c, &rd->map_cache_list[bucket], list) {
+		if (c->sector == sector) {
 			c->last_access = jiffies;
 			return c;
 		}
 	}
+	return NULL;
+}
 
-	/* If not found, read it... */
+static struct eraser_map_cache *holepunch_read_cache_entry(struct eraser_dev *rd,
+		u64 sector, int ignore_magic)
+{
+	u8 key[ERASER_KEY_LEN]; /* If we need to read it */
+	struct eraser_map_cache *c;
+
 	c = eraser_allocate_map_cache(rd);
 	c->map = eraser_read_sector(rd->hp_h->key_table_start + sector, NULL, rd);
 	HP_DOWN_READ(&rd->pprf_sem, "PPRF: read sector");
 	holepunch_evaluate_at_tag(rd, c->map->tag, key, rd->pprf_key);
 	HP_UP_READ(&rd->pprf_sem, "PPRF: read sector");
 	holepunch_cbc_filekey_sector(rd, c->map, c->map, ERASER_DECRYPT, key,
-								 rd->hp_h->key_table_start + sector);
+			rd->hp_h->key_table_start + sector);
+
+	if (likely(ignore_magic))
+		return c;
+	/* This should only happen during a key refresh - if we are reading a 
+	 * sector that has already been refreshed using the old key, the magic 
+	 * will be wrong. So encrypt and re-decrypt using the new key.
+	 * Locking not necessary because the new key will not be punctured at this
+	 * stage.
+	 */
+	if (unlikely(c->map->magic1 != HP_MAGIC1 || c->map->magic2 != HP_MAGIC2)) {
+		KWORKERMSG("Read sector %llu that has already been refreshed!", sector);
+		holepunch_cbc_filekey_sector(rd, c->map, c->map, ERASER_ENCRYPT, key,
+				rd->hp_h->key_table_start + sector);
+		holepunch_evaluate_at_tag(rd, c->map->tag, key, &rd->pprf_key_new);
+		holepunch_cbc_filekey_sector(rd, c->map, c->map, ERASER_DECRYPT, key,
+				rd->hp_h->key_table_start + sector);
+	}
+
+	return c;
+
+}
+
+
+/*
+ * Searches the cache for the entry containing the key for this inode; if not
+ * found, reads the sector from disk and caches it. Passes the relevant bucket
+ * lock to the caller.
+ */
+
+static struct eraser_map_cache *holepunch_get_cache_entry(struct eraser_dev *rd,
+		u64 ino, struct semaphore **cache_lock, int ignore_magic)
+{
+	struct eraser_map_cache *c;
+	u64 sector, bucket;
+	sector = ino / HP_KEY_PER_SECTOR;
+	bucket = sector % ERASER_MAP_CACHE_BUCKETS;
+
+	*cache_lock = &rd->cache_lock[bucket];
+	HP_DOWN(*cache_lock, "Bucket %llu get entry", bucket);
+
+	/* Look first */
+	c = holepunch_find_cache_entry(rd, sector, bucket);
+	if (c)
+		return c;
+
+	/* If not found, read it... */
+	c = holepunch_read_cache_entry(rd, sector, ignore_magic);
 
 	/* ...then add it to the cache */
 	c->sector = sector;
@@ -1139,9 +1213,9 @@ static void holepunch_get_inode_key(struct eraser_dev *rd, u8 *dst, u64 ino)
 {
 	struct holepunch_filekey_sector *sector;
 	struct semaphore *cache_lock;
-	sector = holepunch_get_cache_entry(rd, ino, &cache_lock)->map;
+	sector = holepunch_get_cache_entry(rd, ino, &cache_lock, 0)->map;
 	memcpy(dst, sector->entries[ino % HP_KEY_PER_SECTOR].key, ERASER_KEY_LEN);
-	HP_UP(cache_lock, "inode %llu get key", inode_no);
+	HP_UP(cache_lock, "inode %llu get key", ino);
 }
 
 /* Cache eviction runs in separate kernel thread, periodically. */
@@ -1160,9 +1234,9 @@ static int holepunch_evict_map_cache(void *data)
 
 	while (1)
 	{
-		// #ifdef HOLEPUNCH_DEBUG
-		// 		KWORKERMSG("The reaper has awoken\n");
-		// #endif
+#ifdef HOLEPUNCH_DEBUG
+		KWORKERMSG("The reaper has awoken");
+#endif
 		/* first_access_timeout = jiffies - ERASER_CACHE_EXP_FIRST_ACCESS; */
 		last_access_timeout = jiffies - ERASER_CACHE_EXP_LAST_ACCESS;
 		last_dirty_timeout = jiffies - ERASER_CACHE_EXP_LAST_DIRTY;
@@ -1184,9 +1258,9 @@ static int holepunch_evict_map_cache(void *data)
 
 				if ((will_write_if_dirty || will_evict) && (c->status & ERASER_CACHE_DIRTY))
 				{
-					// #ifdef HOLEPUNCH_DEBUG
-					// 					KWORKERMSG("Reaper persisting sector %u\n", c->sector);
-					// #endif
+#ifdef HOLEPUNCH_DEBUG
+					KWORKERMSG("Reaper persisting sector %llu", c->sector);
+#endif
 					holepunch_persist_unlink(rd, c, &rd->cache_lock[i]);
 				}
 				if (will_evict && (rd->map_cache_count > ERASER_CACHE_MEMORY_PRESSURE))
@@ -1195,12 +1269,12 @@ static int holepunch_evict_map_cache(void *data)
 			up(&rd->cache_lock[i]);
 		}
 
-		// #ifdef HOLEPUNCH_DEBUG
-		// 		down_read(&rd->map_cache_count_sem);
-		// 		KWORKERMSG("The reaper shall return for another bounty... (Cached: %llu)\n",
-		// 			rd->map_cache_count);
-		// 		up_read(&rd->map_cache_count_sem);
-		// #endif
+#ifdef HOLEPUNCH_DEBUG
+		down_read(&rd->map_cache_count_sem);
+		KWORKERMSG("The reaper shall return for another bounty... (Cached: %llu)",
+			rd->map_cache_count);
+		up_read(&rd->map_cache_count_sem);
+#endif
 		msleep_interruptible(ERASER_CACHE_EVICTION_PERIOD * 1000);
 
 		/*
@@ -1540,16 +1614,16 @@ static void holepunch_persist_unlink(struct eraser_dev *rd,
 	/* If we refresh the PPRF, then we don't need to puncture again afterwards */
 	if (holepunch_pprf_size_get(rd) + 2 * rd->hp_h->pprf_depth > rd->hp_h->pprf_capacity)
 	{
-	#ifdef HOLEPUNCH_DEBUG
+#ifdef HOLEPUNCH_DEBUG
 		KWORKERMSG("Puncture by refreshing");
-	#endif
+#endif
 		hp_dbg_setstate(rd, 8*STATEUNIT);
 		HP_UP(cache_lock, "PPRF: persist -> refresh");
 		/* todo: we should not have to force evict here */
-		eraser_force_evict_map_cache(rd, 0);
+		// eraser_force_evict_map_cache(rd, 0);
 		HP_DOWN_READ(&rd->pprf_sem, "PPRF: persist -> refresh");
 		++rd->stats_refresh;
-		holepunch_rotate_pprf(rd);
+		holepunch_rotate_pprf(rd, cache_lock);
 		HP_UP_READ(&rd->pprf_sem, "PPRF: persist -> refresh");
 		HP_DOWN(cache_lock, "PPRF: reacquire");
 		return;
@@ -1646,7 +1720,8 @@ static void holepunch_do_unlink(struct work_struct *work)
 	struct semaphore *cache_lock;
 	struct eraser_unlink_work *w = container_of(work, struct eraser_unlink_work, work);
 	
-	c = holepunch_get_cache_entry(w->rd, w->ino, &cache_lock);
+	c = holepunch_get_cache_entry(w->rd, w->ino, &cache_lock, 0);
+	KWORKERMSG("Unlink: %lu/(bucket:%lu)", w->ino, (w->ino/HP_KEY_PER_SECTOR)%ERASER_MAP_CACHE_BUCKETS);
 	kernel_random(c->map->entries[w->ino % HP_KEY_PER_SECTOR].key, ERASER_KEY_LEN);
 	c->status = ERASER_CACHE_DIRTY;
 	c->last_dirty = jiffies;
@@ -2286,13 +2361,13 @@ skip_pprf_load:
 		DMINFO("Recovering PPRF key rotation");
 		holepunch_ecb(rd, new_key, rd->journal + 1, ERASER_KEY_LEN,
 					ERASER_DECRYPT, rd->master_key);
-		holepunch_do_pprf_rotation(rd, new_key, 0);
+		holepunch_do_pprf_rotation(rd, new_key, 0, NULL);
 		holepunch_rotate_master(rd);
 		goto journal_pprf_finish;
 	case HPJ_PPRF_INIT:
 		DMINFO("Recovering PPRF key initialization");
 		kernel_random(new_key, ERASER_KEY_LEN);
-		holepunch_do_pprf_rotation(rd, new_key, 1);
+		holepunch_do_pprf_rotation(rd, new_key, 1, NULL);
 		holepunch_rotate_master(rd);
 		goto journal_pprf_finish;
 	case HPJ_PPRF_PUNCT:

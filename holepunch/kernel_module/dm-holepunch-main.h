@@ -303,6 +303,7 @@ struct eraser_dev {
 	u32 pprf_key_capacity;
 	struct holepunch_pprf_fkt_sector *pprf_fkt;
 	struct rw_semaphore pprf_sem;
+	struct pprf_keynode pprf_key_new;
 
 	/* Cache-related. */
 	struct list_head map_cache_list[ERASER_MAP_CACHE_BUCKETS];
