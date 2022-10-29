@@ -199,7 +199,7 @@ void print_pprf(struct pprf_keynode *pprf, u32 pprf_size)
 	unsigned len = 80; /* Dangerous */
 	char title[len];
 
-	printk(KERN_INFO "PPRF dump, len %u", pprf_size);
+	printk(KERN_INFO "PPRF dump, len %u\n", pprf_size);
 	for (i = 0; i < pprf_size; ++i) {
 		label_to_string(&pprf[i].lbl, node_label);
 		if (pprf[i].type == PPRF_INTERNAL) {
@@ -210,7 +210,7 @@ void print_pprf(struct pprf_keynode *pprf, u32 pprf_size)
 			sprintf(title, "[K] index %u ", i);
 			dump_key(pprf[i].v.key, title);
 			snprintf(title, len, "label %s", node_label);
-			printk(KERN_INFO "%s", title);
+			printk(KERN_INFO "%s\n", title);
 		} else {
 			printk(KERN_INFO "[P] index %u\n label %s\n", i, node_label);
 		}

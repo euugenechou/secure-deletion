@@ -12,7 +12,7 @@ cd /mnt/home
 
 fname=""
 contents=""
-numfiles=500
+numfiles=5000
 
 echo "Numfiles = " $numfiles
 
@@ -35,7 +35,7 @@ do
     rm "$fname"
 done
 
-sleep 60
+sleep 30
 ls
 printf -v fname "hello%04d" "$((numfiles - 2))"
 cat "$fname"
