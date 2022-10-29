@@ -38,7 +38,7 @@ void enter_netlink_loop() {
     struct msghdr msg;
 
     unsigned char *key_out; /* TPM lib allocates this for us. */
-    unsigned char key[ERASER_KEY_LEN];
+    unsigned char key[HOLEPUNCH_KEY_LEN];
     char eraser_name[ERASER_NAME_LEN + 1];
 
     int self_pid;
@@ -103,9 +103,9 @@ void enter_netlink_loop() {
                 h->nlmsg_pid = self_pid;
                 h->nlmsg_type = ERASER_MSG_GET_KEY;
                 strcpy(NLMSG_DATA(h), eraser_name);
-                memcpy(NLMSG_DATA(h) + ERASER_NAME_LEN, key_out, ERASER_KEY_LEN);
+                memcpy(NLMSG_DATA(h) + ERASER_NAME_LEN, key_out, HOLEPUNCH_KEY_LEN);
 
-                memset(key_out, 0, ERASER_KEY_LEN);
+                memset(key_out, 0, HOLEPUNCH_KEY_LEN);
                 free(key_out);
 
                 iov.iov_base = (void *) h;
@@ -120,7 +120,7 @@ void enter_netlink_loop() {
             } else if (h->nlmsg_type == ERASER_MSG_SET_KEY) {
                 memcpy(eraser_name, NLMSG_DATA(h), ERASER_NAME_LEN);
                 eraser_name[ERASER_NAME_LEN] = '\0';
-                memcpy(key, NLMSG_DATA(h) + ERASER_NAME_LEN, ERASER_KEY_LEN);
+                memcpy(key, NLMSG_DATA(h) + ERASER_NAME_LEN, HOLEPUNCH_KEY_LEN);
 
                 /* Write key to TPM. */
                 if (write_nvram(nvram, key) != TSS_SUCCESS) {
@@ -128,7 +128,7 @@ void enter_netlink_loop() {
                     /* TODO: Do something about it. */
                     break;
                 }
-                memset(key, 0, ERASER_KEY_LEN);
+                memset(key, 0, HOLEPUNCH_KEY_LEN);
 
                 /* Send ACK to kernel. */
                 memset(h, 0, NLMSG_SPACE(MAX_PAYLOAD));

@@ -37,7 +37,7 @@ void handle_signal(int sig) {
 }
 
 
-char enc_key[ERASER_KEY_LEN];
+char enc_key[HOLEPUNCH_KEY_LEN];
 char *tpm_owner_pass = NULL;
 struct eraser_tpm *tpm;
 struct eraser_nvram *nvram;
@@ -50,7 +50,7 @@ struct eraser_nvram *nvram;
 void get_keys(int op, struct eraser_header *h) {
     char *pass;
     char *pass_v;
-    char pass_key[ERASER_KEY_LEN];
+    char pass_key[HOLEPUNCH_KEY_LEN];
 
     struct termios old_term;
     struct termios new_term;
@@ -99,7 +99,7 @@ void get_keys(int op, struct eraser_header *h) {
     if (op == ERASER_CREATE) {
         get_random_data(h->pass_salt, ERASER_SALT_LEN);
     }
-    generate_key(pass, ERASER_KEY_LEN, pass_key, h->pass_salt, ERASER_SALT_LEN);
+    generate_key(pass, HOLEPUNCH_KEY_LEN, pass_key, h->pass_salt, ERASER_SALT_LEN);
     memset(pass, 0, strlen(pass));
     free(pass);
     printf("\n");
@@ -109,20 +109,20 @@ void get_keys(int op, struct eraser_header *h) {
 
     if (op == ERASER_CREATE) {
         /* Randomly generate the disk encryption key. */
-        get_random_data(enc_key, ERASER_KEY_LEN);
+        get_random_data(enc_key, HOLEPUNCH_KEY_LEN);
 
         /* Store encrypted disk encryption key in the header. */
-        encrypt(enc_key, h->enc_key, ERASER_KEY_LEN, pass_key, 0);
+        encrypt(enc_key, h->enc_key, HOLEPUNCH_KEY_LEN, pass_key, 0);
         get_random_data(h->enc_key_salt, ERASER_SALT_LEN);
-        digest_key(enc_key, ERASER_KEY_LEN, h->enc_key_digest, ERASER_DIGEST_LEN, h->enc_key_salt, ERASER_SALT_LEN);
+        digest_key(enc_key, HOLEPUNCH_KEY_LEN, h->enc_key_digest, ERASER_DIGEST_LEN, h->enc_key_salt, ERASER_SALT_LEN);
 
     } else {
         /* Decrypt the disk encryption key. */
-        decrypt(h->enc_key, enc_key, ERASER_KEY_LEN, pass_key, 0);
+        decrypt(h->enc_key, enc_key, HOLEPUNCH_KEY_LEN, pass_key, 0);
     }
 
     /* Clean the pass key memory. */
-    memset(pass_key, 0, ERASER_KEY_LEN);
+    memset(pass_key, 0, HOLEPUNCH_KEY_LEN);
 }
 
 /* Decrypt and verify the key. */
@@ -130,7 +130,7 @@ int verify_key(struct eraser_header *h) {
 
     char digest[ERASER_DIGEST_LEN];
 
-    digest_key(enc_key, ERASER_KEY_LEN, digest, ERASER_DIGEST_LEN, h->enc_key_salt, ERASER_SALT_LEN);
+    digest_key(enc_key, HOLEPUNCH_KEY_LEN, digest, ERASER_DIGEST_LEN, h->enc_key_salt, ERASER_SALT_LEN);
     if(memcmp(digest, h->enc_key_digest, ERASER_DIGEST_LEN) != 0) {
         return 0;
     }
@@ -150,7 +150,7 @@ int hp_verify_key(struct holepunch_header *h) {
 
 /* Clean the key memory. */
 void cleanup_keys() {
-    memset(enc_key, 0, ERASER_KEY_LEN);
+    memset(enc_key, 0, HOLEPUNCH_KEY_LEN);
     if (tpm_owner_pass) {
         free(tpm_owner_pass);
     }
@@ -274,7 +274,7 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
 #endif
 
     /* Hex encode the key bytes. */
-    hex_key = hex_encode(enc_key, ERASER_KEY_LEN);
+    hex_key = hex_encode(enc_key, HOLEPUNCH_KEY_LEN);
 
     /* These parameters will be passed to the kernel module. */
     snprintf(param, 4096, "%s %s %s %s %d\n",
@@ -325,7 +325,7 @@ out:
 
     /* Clean the key. */
     memset(param, 0, 4096);
-    memset(hex_key, 0, ERASER_KEY_LEN);
+    memset(hex_key, 0, HOLEPUNCH_KEY_LEN);
     free(hex_key);
 
     return is_success;
@@ -361,7 +361,7 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
 
     /* Define the NVRAM region on TPM. */
     tpm = setup_tpm(tpm_owner_pass);
-    nvram = setup_nvram(hp_h->nv_index, ERASER_KEY_LEN, tpm_owner_pass, tpm);
+    nvram = setup_nvram(hp_h->nv_index, HOLEPUNCH_KEY_LEN, tpm_owner_pass, tpm);
 
     /* Construct mapped device path. */
     mapped_dev_path = malloc(strlen(ERASER_DEV_PATH) + strlen(mapped_dev) + 1);
@@ -421,7 +421,7 @@ int start_netlink_client(char *eraser_name) {
 void do_create(char *dev_path, int nv_index) {
 
     // struct eraser_header *h;
-    unsigned char master_key[ERASER_KEY_LEN];
+    unsigned char master_key[HOLEPUNCH_KEY_LEN];
     u64 dev_size;
     u64 inode_count;
     int fd, i;
@@ -481,25 +481,25 @@ void do_create(char *dev_path, int nv_index) {
 
     /* Prompt user for password and randomize the IV key. */
     hp_get_keys(ERASER_CREATE, hp_h);
-    get_random_data(hp_h->iv_key, ERASER_KEY_LEN);
+    get_random_data(hp_h->iv_key, HOLEPUNCH_KEY_LEN);
 
     /* Define the NVRAM region on TPM. */
     tpm = setup_tpm(tpm_owner_pass);
-    nvram = setup_nvram(nv_index, ERASER_KEY_LEN, tpm_owner_pass, tpm);
+    nvram = setup_nvram(nv_index, HOLEPUNCH_KEY_LEN, tpm_owner_pass, tpm);
     hp_h->nv_index = nv_index;
 
-    get_random_data(master_key, ERASER_KEY_LEN);
+    get_random_data(master_key, HOLEPUNCH_KEY_LEN);
     if (write_nvram(nvram, master_key) != TSS_SUCCESS) {
         print_red("Cannot write master key!");
         goto tpm_error;
     }
-    memset(master_key, 0, ERASER_KEY_LEN);
+    memset(master_key, 0, HOLEPUNCH_KEY_LEN);
 
     /* Write the header, then a journal entry for PPRF init. */
     write_sectors(fd, hp_h, ERASER_HEADER_LEN);
     u64 *journal_ctl = malloc(ERASER_SECTOR);
     journal_ctl[0] = HPJ_PPRF_INIT;
-    get_random_data(journal_ctl + 1, ERASER_KEY_LEN);
+    get_random_data(journal_ctl + 1, HOLEPUNCH_KEY_LEN);
     write_sectors(fd, journal_ctl, 1);
     /* Randomize the rest of the journal and all of the key table. */
     for (i = 1; i < HP_JOURNAL_LEN + key_table_len; ++i) {

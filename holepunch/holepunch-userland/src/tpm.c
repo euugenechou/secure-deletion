@@ -39,7 +39,7 @@ TSS_RESULT write_nvram(struct eraser_nvram *n, unsigned char *data) {
     int f;
 
     f = open("/tmp/tpm_test", O_RDWR | O_CREAT);
-    write(f, data, ERASER_KEY_LEN);
+    write(f, data, HOLEPUNCH_KEY_LEN);
     close(f);
     return TSS_SUCCESS;
 }
@@ -48,8 +48,8 @@ TSS_RESULT read_nvram(struct eraser_nvram *n, unsigned char **out) {
     int f;
 
     f = open("/tmp/tpm_test", O_RDWR);
-    *out = malloc(ERASER_KEY_LEN);
-    read(f, *out, ERASER_KEY_LEN);
+    *out = malloc(HOLEPUNCH_KEY_LEN);
+    read(f, *out, HOLEPUNCH_KEY_LEN);
     close(f);
     return TSS_SUCCESS;
 }

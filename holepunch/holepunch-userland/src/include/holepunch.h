@@ -48,7 +48,8 @@
 #define PRG_INPUT_LEN 32
 // The key growth is the PPRF depth times this value
 #define HOLEPUNCH_KEY_GROWTH_MULT  2
-#define HOLEPUNCH_REFRESH_INTERVAL 2
+/* now in makefile */
+// #define HOLEPUNCH_REFRESH_INTERVAL 2
 
 #define ERASER_CREATE 0
 #define ERASER_OPEN 1
@@ -83,7 +84,7 @@ struct pprf_keynode {
 
 /* Must match the kernel side definition. */
 struct eraser_header {
-    char enc_key[ERASER_KEY_LEN];           /* Encrypted disk sector encryption key. */
+    char enc_key[HOLEPUNCH_KEY_LEN];           /* Encrypted disk sector encryption key. */
     char enc_key_digest[ERASER_DIGEST_LEN]; /* External key digest. */
     char enc_key_salt[ERASER_SALT_LEN];     /* External key salt. */
     char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
@@ -104,14 +105,14 @@ struct eraser_header {
 
 /* Holepunch header; must match the definition in kernel. */
 struct holepunch_header {
-    char enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
+    char enc_key[HOLEPUNCH_KEY_LEN];           /* Encrypted sector encryption key. */
     char enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
     char enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
     char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
     u64 nv_index;                         /* Master key TPM NVRAM index. */
 
     /* IV generation key, encrypted by master key. */
-    char iv_key[ERASER_KEY_LEN];
+    char iv_key[HOLEPUNCH_KEY_LEN];
 
     /* All in ERASER sectors, strictly consecutive; header starts at zero. */
     u64 journal_start;
@@ -137,7 +138,7 @@ struct holepunch_header {
 };
 
 struct holepunch_key {
-    char key[ERASER_KEY_LEN];
+    char key[HOLEPUNCH_KEY_LEN];
 };
 
 /* Journal constants; only HPJ_PPRF_INIT needed, but whatever. */
@@ -172,7 +173,7 @@ struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
 
 /* size padded to 64 bytes, must be multiple of sector size */
 struct eraser_map_entry {
-    unsigned char key[ERASER_KEY_LEN];
+    unsigned char key[HOLEPUNCH_KEY_LEN];
     unsigned char iv[ERASER_IV_LEN];
     u64 status;
     u64 padding;

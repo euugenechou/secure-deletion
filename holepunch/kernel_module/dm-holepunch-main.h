@@ -40,7 +40,7 @@
 #define ERASER_SECTOR_SCALE (ERASER_SECTOR / ERASER_HW_SECTOR)
 
 #define ERASER_HEADER_LEN 1  /* In blocks. */
-#define ERASER_KEY_LEN 32    /* In bytes. */
+#define HOLEPUNCH_KEY_LEN 32    /* In bytes. */
 #define ERASER_IV_LEN 16     /* In bytes. */
 #define ERASER_SALT_LEN 32   /* In bytes. */
 #define ERASER_DIGEST_LEN 32 /* In bytes. */
@@ -50,8 +50,8 @@
 #define HP_HASH_LEN 32       /* In bytes. */
 
 /* Crypto operations. */
-#define ERASER_ENCRYPT 1
-#define ERASER_DECRYPT 2
+#define HOLEPUNCH_ENCRYPT 1
+#define HOLEPUNCH_DECRYPT 2
 
 /* Cache flags & constants. */
 #define ERASER_CACHE_DIRTY       0x000000001
@@ -130,12 +130,12 @@
 #endif
 
 struct holepunch_key {
-	u8 key[ERASER_KEY_LEN];
+	u8 key[HOLEPUNCH_KEY_LEN];
 };
 
-#define HP_KEY_PER_SECTOR ((ERASER_SECTOR - 32)/ERASER_KEY_LEN)
+#define HP_KEY_PER_SECTOR ((ERASER_SECTOR - 32)/HOLEPUNCH_KEY_LEN)
 #define HP_PPRF_PER_SECTOR (ERASER_SECTOR/sizeof(struct pprf_keynode))
-#define HP_FKT_PER_SECTOR ((ERASER_SECTOR - 16)/ERASER_KEY_LEN)
+#define HP_FKT_PER_SECTOR ((ERASER_SECTOR - 16)/HOLEPUNCH_KEY_LEN)
 
 /* Chosen at random because I couldn't think of enough fun values. */
 #define HP_MAGIC1 0xbffb8ee808b32e40
@@ -171,14 +171,14 @@ struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
  * The kernel module should treat this as read-only
  */
 struct holepunch_header {
-	u8 enc_key[ERASER_KEY_LEN];           /* Encrypted sector encryption key. */
+	u8 enc_key[HOLEPUNCH_KEY_LEN];           /* Encrypted sector encryption key. */
 	u8 enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
 	u8 enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
 	u8 pass_salt[ERASER_SALT_LEN];        /* Password salt. */
 	u64 nv_index;                         /* Master key TPM NVRAM index. */
 
 	/* IV generation key. TODO should this be encrypted? */
-	u8 iv_key[ERASER_KEY_LEN];
+	u8 iv_key[HOLEPUNCH_KEY_LEN];
 
 	/* All in ERASER sectors, strictly consecutive; header starts at zero. */
 	u64 journal_start;
@@ -276,7 +276,7 @@ enum {
 
 
 /* Represents a ERASER instance. */
-struct eraser_dev {
+struct holepunch_dev {
 	char eraser_name[ERASER_NAME_LEN + 1]; /* Instance name. */
 	struct dm_dev *real_dev;               /* Underlying block device. */
 	dev_t virt_dev;                        /* Virtual device-mapper node. */
@@ -284,8 +284,8 @@ struct eraser_dev {
 	u8 *virt_dev_path;
 
 	u8 *sec_key;                       /* Sector encryption key. */
-	u8 master_key[ERASER_KEY_LEN];     /* File encryption master key. */
-	u8 new_master_key[ERASER_KEY_LEN]; /* Temporary key before syncing to TPM. */
+	u8 master_key[HOLEPUNCH_KEY_LEN];     /* File encryption master key. */
+	u8 new_master_key[HOLEPUNCH_KEY_LEN]; /* Temporary key before syncing to TPM. */
 	struct completion master_key_wait;
 	unsigned long master_key_status;   /* Key status flags. */
 	int helper_pid;                    /* Netlink talks to this pid. */
@@ -345,15 +345,14 @@ struct eraser_dev {
 	u64 stats_refresh;
 #ifdef HOLEPUNCH_DEBUG
 	volatile unsigned state;
-	volatile unsigned die;
 #endif
 };
-static LIST_HEAD(eraser_dev_list); /* We keep all ERASERs in a list. */
-static DEFINE_SEMAPHORE(eraser_dev_lock);
+static LIST_HEAD(holepunch_dev_list); /* We keep all ERASERs in a list. */
+static DEFINE_SEMAPHORE(holepunch_dev_lock);
 
 /* Represents an IO operation in flight. */
 struct eraser_io_work {
-	struct eraser_dev *rd;
+	struct holepunch_dev *rd;
 	struct bio *bio;
 	unsigned is_file;
 	struct work_struct work;
@@ -361,7 +360,7 @@ struct eraser_io_work {
 
 /* Represents an unlink operation in flight. */
 struct eraser_unlink_work {
-	struct eraser_dev *rd;
+	struct holepunch_dev *rd;
 	unsigned long ino;
 	struct work_struct work;
 };
@@ -385,11 +384,11 @@ struct eraser_unlink_work {
 
 // #pragma GCC pop_options
 
-void holepunch_dump_fkt(struct eraser_dev *rd) 
+void holepunch_dump_fkt(struct holepunch_dev *rd) 
 {
 #ifdef HOLEPUNCH_DEBUG
 	unsigned i, j, ent;
-	unsigned len = 3*ERASER_KEY_LEN + 1;
+	unsigned len = 3*HOLEPUNCH_KEY_LEN + 1;
 	char buf[len];
 
 	if (!rd->pprf_fkt) {
@@ -400,7 +399,7 @@ void holepunch_dump_fkt(struct eraser_dev *rd)
 	printk(KERN_INFO "  top fkt level : select keys\n");
 	for (i = 0; i < rd->hp_h->fkt_top_width; ++i) {
 		for (ent = 0; ent < 3; ++ent) {
-			for (j = 0; j < ERASER_KEY_LEN; ++j) {
+			for (j = 0; j < HOLEPUNCH_KEY_LEN; ++j) {
 				sprintf(buf + 3*j, "%02hhx ", rd->pprf_fkt[i].entries[0].key[j]);
 			}
 			buf[len-1] = 0;
@@ -410,13 +409,13 @@ void holepunch_dump_fkt(struct eraser_dev *rd)
 
 	printk(KERN_INFO "  bottom fkt level : select keys\n");
 	for (; i < rd->hp_h->fkt_top_width + rd->hp_h->fkt_bottom_width; ++i) {
-		for (j = 0; j < ERASER_KEY_LEN; ++j) {
+		for (j = 0; j < HOLEPUNCH_KEY_LEN; ++j) {
 			sprintf(buf + 3*j, "%02hhx ", rd->pprf_fkt[i].entries[0].key[j]);
 		}
 		buf[len-1] = 0;
 		printk(KERN_INFO "--%llu,0: %s\n", i-rd->hp_h->fkt_top_width, buf);
 
-		for (j = 0; j < ERASER_KEY_LEN; ++j) {
+		for (j = 0; j < HOLEPUNCH_KEY_LEN; ++j) {
 			sprintf(buf + 3*j, "%02hhx ", rd->pprf_fkt[i].entries[HP_FKT_PER_SECTOR-1].key[j]);
 		}
 		buf[len-1] = 0;
