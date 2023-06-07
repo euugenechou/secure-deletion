@@ -8,7 +8,12 @@ The Spin model checker can verify multi-threaded software with the models define
 Properties in Spin are in LTL. Using LTL, we can encode properties about the future states on paths.
 
 **LTL Syntax**
-TODO: not sure if I'll include a description of this yet.
+Some LTL formulae and their use in Spin:
+```
+[]P     : always P (invariance)
+<>P     : eventually P
+P U Q   : P is true until Q becomes true
+```
 
 ### NuXmv
 

@@ -36,8 +36,8 @@ proctype Receiver(chan in, out)
 {
     bit recvbit;
     do
-    :: in ? MSG(recvbit) ->
-        out ! ACK(recvbit);
+    :: in ? MSG, recvbit ->
+        out ! ACK, recvbit;
     od
 }
 
