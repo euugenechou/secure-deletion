@@ -1,26 +1,6 @@
 # Secure Deletion from Puncturable Pseudorandom Functions
 Secure data deletion ensures that **deleted files are irrecoverable by an adversary that later obtains physical access to the underlying storage medium**. In this work, we present an novel method for provably secure deletion of files. First, we bootstrap secure deletion by using an external computing resource that the user controls (e.g., a TPM or SmartCard) to store a master key that never persists to disk. Second, we use a *puncturable pseudorandom function* (PPRF) to  generate per-file encryption keys on-the-fly. File access requires only a very efficient PPRF evaluation per file key retrieval and a single disk IO operation. File deletion is also fast, consisting only of an efficient *puncture* operation on the PPRF key and a constant number of symmetric encryptions. As a result, our techniques greatly minimize the disk IO overhead associated with prior approaches to secure deletion. This results in a significant performance improvement in practice. 
 
-## Puncturable Pseudorandom Functions (PPRF)
-A core ingredient of our techniques is the ability to efficiently generate per-file encryption keys on the fly using a **puncturable pseudorandom function (PPRF)**. Recall that a *pseudorandom function* (PRF) $F$ is a function that "looks random" to any computationally bounded adversary that is given polynomially many evaluations of $F_k(\cdot)$ when $k$ is chosen uniformly at random.
-
-A puncturable PRF is a pseudorandom function with an additional *puncture* operation defined as:
-
-- puncture$(k, x) \rightarrow k^\*$, where $k^\*$ is a new *punctured* key for $F$ such that $F_{k^*}(x') = F_k(x')$ for all $x' \ne x$
-
-Additionally, it follows that for any computationally bounded adversary with access to a punctured key $k^\*$, the value $F_k(x)$ is computationally indistinguishable from random.
-
-## Benchmarking
-The following table shows the average PPRF evaluation and puncturing times across $0 - N$ puncturing operations for our reference PPRF implementation in `pprf.py`. In each test, the PPRF is initialized and then random points are punctured one at a time up to $N$. 
-
-|                           |  0 - 100 |  0 - 500 | 0 - 1,000 | 0 - 2,500 | 0 - 5,000 | 0 - 10,000 |
-|---------------------------|:------:|:------:|:------:|:------:|:------:|:-------:|
-|     Avg. Eval Time (s)    | 0.0132 | 0.0129 | 0.0128 | 0.0127 | 0.0126 | 0.0125  |
-|    Avg. Puncture Time (s)   | 0.0133 | 0.0131 | 0.013  | 0.0129 | 0.013  | 0.0133  |
-| Avg. Key Size (#sub-keys) | 12,050  | 59,079  | 117,150 | 289,568 | 574,109 | 1,138,264 |
-
-Our preliminary results show that evaluation and puncturing times are essentially constant across the number of punctures. Unsurprisingly, the punctured key size grows linearly with the number of punctures. However, **our experimental results showed that only ~5% of the punctured key is needed in order to evaluate 99% of the PPRF points**. In practice, this means that only a small portion of the PPRF key is needed in memory. 
-
 ## References
 [G05] Garfinkel, S. (2005). Design principles and patterns for computer systems that are simultaneously secure and usable (Doctoral dissertation, Massachusetts Institute of Technology).
 
