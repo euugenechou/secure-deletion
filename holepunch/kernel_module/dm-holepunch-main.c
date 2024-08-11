@@ -347,8 +347,8 @@ static void holepunch_ecb(
     int op,
     u8 *key
 ) {
-    // EUGEBE: It looks like this is just used to produce an IV, so we probably
-    // don't care about the fake IV that we pass in (so it'll be null).
+    // EUGEBE: ECB is just used to produce an IV and doesn't itself need an IV,
+    // so passing an all-zero IV should be ok.
     u8 null_iv[ERASER_IV_LEN] = {0};
     struct crypto_skcipher *tfm = rd->ecb_tfm[get_cpu()];
     // crypto_blkcipher_setkey(tfm, key, HOLEPUNCH_KEY_LEN);
@@ -642,6 +642,60 @@ static void holepunch_read_fkt(struct holepunch_dev *rd) {
 
     kunmap(p);
     eraser_free_page(p, rd);
+}
+
+// EUGEBE: Relocated from `dm-holepunch-main.h`, not sure why it was there.
+static void holepunch_dump_fkt(struct holepunch_dev *rd) {
+#ifdef HOLEPUNCH_DEBUG
+    unsigned i, j, ent;
+    unsigned len = 3 * HOLEPUNCH_KEY_LEN + 1;
+    char buf[len];
+
+    if (!rd->pprf_fkt) {
+        printk(KERN_INFO "PPRF FKT not loaded\n");
+        return;
+    }
+
+    printk(KERN_INFO "  top fkt level : select keys\n");
+    for (i = 0; i < rd->hp_h->fkt_top_width; ++i) {
+        for (ent = 0; ent < 3; ++ent) {
+            for (j = 0; j < HOLEPUNCH_KEY_LEN; ++j) {
+                sprintf(
+                    buf + 3 * j,
+                    "%02hhx ",
+                    rd->pprf_fkt[i].entries[0].key[j]
+                );
+            }
+            buf[len - 1] = 0;
+            printk(KERN_INFO "%u: %s\n", ent, buf);
+        }
+    }
+
+    printk(KERN_INFO "  bottom fkt level : select keys\n");
+    for (; i < rd->hp_h->fkt_top_width + rd->hp_h->fkt_bottom_width; ++i) {
+        for (j = 0; j < HOLEPUNCH_KEY_LEN; ++j) {
+            sprintf(buf + 3 * j, "%02hhx ", rd->pprf_fkt[i].entries[0].key[j]);
+        }
+        buf[len - 1] = 0;
+        printk(KERN_INFO "--%llu,0: %s\n", i - rd->hp_h->fkt_top_width, buf);
+
+        for (j = 0; j < HOLEPUNCH_KEY_LEN; ++j) {
+            sprintf(
+                buf + 3 * j,
+                "%02hhx ",
+                rd->pprf_fkt[i].entries[HP_FKT_PER_SECTOR - 1].key[j]
+            );
+        }
+        buf[len - 1] = 0;
+        printk(
+            KERN_INFO "--%llu,%u: %s\n",
+            i - rd->hp_h->fkt_top_width,
+            HP_FKT_PER_SECTOR,
+            buf
+        );
+    }
+
+#endif
 }
 
 /* Assumes that the FKT is in memory
@@ -1219,6 +1273,7 @@ static void holepunch_do_pprf_rotation(
     for (s = 0; s != rd->hp_h->fkt_top_width; ++s) {
         hp_dbg_incrstate_die(rd, "do rotate pprf: write top fkt");
 
+        // EUGEBE: Not sure if an all-zero IV is correct here.
         __holepunch_blkcipher(
             rd->pprf_fkt + s,
             rd->pprf_fkt + s,
@@ -1265,6 +1320,7 @@ static void holepunch_do_pprf_rotation(
     for (; s != rd->fkt_len; ++s) {
         hp_dbg_incrstate_die(rd, "do rotate pprf: write bot fkt");
 
+        // EUGEBE: Not sure if an all-zero IV is correct here.
         __holepunch_blkcipher(
             rd->pprf_fkt + s,
             rd->pprf_fkt + s,
