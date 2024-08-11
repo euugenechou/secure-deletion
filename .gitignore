@@ -1,17 +1,24 @@
 .DS_Store
 .vscode
+.cache
+
+compile_commands.json
 
 **/*.mod
 **/*.mod.c
+**/*.mod.cmd
 **/*.mod.dwo
 **/*.mod.o.cmd
 **/*.o
 **/*.o.cmd
+**/*.o.d
 **/*.ko
 **/*.ko.cmd
 **/*.dwo
 **/Module.symvers
+**/.Module.symvers.cmd
 **/modules.order
+**/.modules.order.cmd
 
 *.sh
 

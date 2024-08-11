@@ -1,4 +1,7 @@
-LINUXROOT = ~/Desktop/linux
+ifeq ($(TEST),)
+LINUXROOT := ~/linux
+endif
+
 obj-m := dm-holepunch.o
 dm-holepunch-y := dm-holepunch-main.o pprf-tree.o
 
