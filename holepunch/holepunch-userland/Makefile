@@ -12,10 +12,9 @@ DEP=$(patsubst %,$(DEPDIR)/%,$(_DEP))
 
 HOLEPUNCH_REFRESH_INTERVAL=1000
 
-CC=gcc
-CFLAGS= -I$(DEPDIR) -Wall -Wno-pointer-sign -Wno-format -O2 -DHOLEPUNCH_REFRESH_INTERVAL=$(HOLEPUNCH_REFRESH_INTERVAL)
+CC = clang
+CFLAGS = -I$(DEPDIR) -Wall -Wno-pointer-sign -Wno-format -O2 -DHOLEPUNCH_REFRESH_INTERVAL=$(HOLEPUNCH_REFRESH_INTERVAL)
 LIBS=-lcrypto -ldevmapper -ltspi
-
 
 all: dirs $(EXEC)
 

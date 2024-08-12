@@ -24,6 +24,7 @@
 #include "holepunch.h"
 
 #include <signal.h>
+#include <string.h>
 
 #include "crypto.h"
 #include "netlink.h"
@@ -38,8 +39,11 @@ void handle_signal(int sig) {
     }
 }
 
+// EUGEBE: gross
+#define MAX_PASS_LEN ((1 << 15) + 1)
+
 char enc_key[HOLEPUNCH_KEY_LEN];
-char *tpm_owner_pass = NULL;
+char tpm_owner_pass[MAX_PASS_LEN];
 struct eraser_tpm *tpm;
 struct eraser_nvram *nvram;
 
@@ -47,53 +51,64 @@ struct eraser_nvram *nvram;
  * Key derivation and management.
  */
 
+static char *read_line(char *buf, size_t len) {
+    char *ret = fgets(buf, len, stdin);
+    if (ret) {
+        ret[strcspn(ret, "\n")] = '\0';
+    }
+    return ret;
+}
+
 /* Prompts the user for a password and generates/derives the crypto key. */
 void get_keys(int op, struct eraser_header *h) {
-    char *pass;
-    char *pass_v;
+    char pass[MAX_PASS_LEN];
+    char pass_v[MAX_PASS_LEN];
     char pass_key[HOLEPUNCH_KEY_LEN];
 
-    struct termios old_term;
-    struct termios new_term;
+    // struct termios old_term;
+    // struct termios new_term;
 
     /* Turn terminal echo off. */
-    tcgetattr(STDIN_FILENO, &old_term);
-    new_term = old_term;
-    new_term.c_lflag &= ~(ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
+    // tcgetattr(STDIN_FILENO, &old_term);
+    // new_term = old_term;
+    // new_term.c_lflag &= ~(ECHO);
+    // tcsetattr(STDIN_FILENO, TCSANOW, &new_term);
 
     /* Prompt for TPM owner password. */
     printf("Please enter TPM owner password: ");
-    if (scanf("%ms", &tpm_owner_pass) != 1) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+    // if ((ret = scanf("%[^\n]", tpm_owner_pass)) != 1) {
+    if (!read_line(tpm_owner_pass, MAX_PASS_LEN)) {
+        // tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
         die("\nError reading password!\n");
     }
+    printf("OWNER PASS = %s\n", tpm_owner_pass);
 
     /* Prompt for password. */
     printf("\nPlease enter ERASER password: ");
-    if (scanf("%ms", &pass) != 1) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+    // if ((ret = scanf("%[^\n]", pass)) != 1) {
+    if (!read_line(pass, MAX_PASS_LEN)) {
+        // tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
         die("\nError reading password!\n");
     }
 
     /* Check again. */
     if (op == ERASER_CREATE) {
         printf("\nPlease re-enter ERASER password: ");
-        if (scanf("%ms", &pass_v) != 1) {
-            tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+        // if (scanf("%[^\n]", pass_v) != 1) {
+        if (!read_line(pass_v, MAX_PASS_LEN)) {
+            // tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
             memset(pass, 0, strlen(pass));
             die("\nError reading password!\n");
         }
 
         if (strcmp(pass, pass_v) != 0) {
-            tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+            // tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
             memset(pass, 0, strlen(pass));
             memset(pass_v, 0, strlen(pass_v));
             die("\nPasswords do not match!\n");
         }
 
         memset(pass_v, 0, strlen(pass_v));
-        free(pass_v);
     }
 
     /* Derive the pass keys. */
@@ -108,11 +123,10 @@ void get_keys(int op, struct eraser_header *h) {
         ERASER_SALT_LEN
     );
     memset(pass, 0, strlen(pass));
-    free(pass);
     printf("\n");
 
-    /* Restore terminal settings. */
-    tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
+    // /* Restore terminal settings. */
+    // tcsetattr(STDIN_FILENO, TCSANOW, &old_term);
 
     if (op == ERASER_CREATE) {
         /* Randomly generate the disk encryption key. */
@@ -170,9 +184,6 @@ int hp_verify_key(struct holepunch_header *h) {
 /* Clean the key memory. */
 void cleanup_keys() {
     memset(enc_key, 0, HOLEPUNCH_KEY_LEN);
-    if (tpm_owner_pass) {
-        free(tpm_owner_pass);
-    }
 }
 
 /*
