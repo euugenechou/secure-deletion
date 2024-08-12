@@ -1,4 +1,6 @@
-LINUXROOT = ~/Desktop/linux
+ifeq ($(TEST),)
+LINUXROOT := ~/linux
+endif
 
 obj-m := dm-eraser.o
 
