@@ -2,8 +2,8 @@ all: kmod userland
 
 .PHONY: kmod
 kmod:
-	$(MAKE) -C ./kernel_module
+	cd ./kernel_module && $(MAKE)
 
 .PHONY: userland
 userland:
-	$(MAKE) -C ./holepunch-userland notpm
+	cd ./holepunch-userland && $(MAKE) notpm

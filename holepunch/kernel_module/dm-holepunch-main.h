@@ -332,7 +332,7 @@ struct holepunch_dev {
     atomic_t jobs;
 
     /* Memory pools. */
-    struct bio_set *bioset;
+    struct bio_set bioset;
     mempool_t *page_pool;
     struct kmem_cache *_io_work_pool;
     mempool_t *io_work_pool;

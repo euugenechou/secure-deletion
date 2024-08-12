@@ -23,6 +23,8 @@
 
 #include "dm-holepunch-main.h"
 
+#include "asm-generic/bug.h"
+
 #define STATEUNIT 100000
 #ifdef HOLEPUNCH_DEBUG
     #include "linux/moduleparam.h"
@@ -146,7 +148,7 @@ eraser_allocate_bio_multi_vector(int vec_no, struct holepunch_dev *rd) {
         vec_no,
         0,  // TODO: idk what the default flags are
         GFP_KERNEL,
-        rd->bioset
+        &rd->bioset
     );
     if (!b)
         DMWARN("Cannot allocate new bio!");
@@ -1680,7 +1682,7 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w) {
 
     // EUGEBE: use bio_alloc_clone() instead of deprecated bio_clone_fast()
     // clone = bio_clone_fast(w->bio, GFP_NOIO, w->rd->bioset);
-    clone = bio_alloc_clone(w->bio->bi_bdev, w->bio, GFP_NOIO, w->rd->bioset);
+    clone = bio_alloc_clone(w->bio->bi_bdev, w->bio, GFP_NOIO, &w->rd->bioset);
     while (clone->bi_iter.bi_size) {
         vec = bio_iter_iovec(clone, clone->bi_iter);
         bio_advance_iter(clone, &clone->bi_iter, vec.bv_len);
@@ -1723,7 +1725,7 @@ static void eraser_do_read_bottomhalf(struct eraser_io_work *w) {
     /* Read is complete at this point. Simply iterate over pages and decrypt. */
     // EUGEBE: use bio_alloc_clone() instead of deprecated bio_clone_fast()
     // clone = bio_clone_fast(w->bio, GFP_NOIO, w->rd->bioset);
-    clone = bio_alloc_clone(w->bio->bi_bdev, w->bio, GFP_NOIO, w->rd->bioset);
+    clone = bio_alloc_clone(w->bio->bi_bdev, w->bio, GFP_NOIO, &w->rd->bioset);
     while (clone->bi_iter.bi_size) {
         vec = bio_iter_iovec(clone, clone->bi_iter);
         bio_advance_iter(clone, &clone->bi_iter, vec.bv_len);
@@ -1852,7 +1854,7 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
         bio_get(bio);
         // EUGEBE: use bio_alloc_clone() instead of deprecated bio_clone_fast()
         // clone = bio_clone_fast(bio, GFP_NOIO, rd->bioset);
-        clone = bio_alloc_clone(bio->bi_bdev, bio, GFP_NOIO, rd->bioset);
+        clone = bio_alloc_clone(bio->bi_bdev, bio, GFP_NOIO, &rd->bioset);
         clone->bi_private = w;
         clone->bi_end_io = &eraser_read_end_io;
         submit_bio(clone);
@@ -2537,17 +2539,22 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv) {
     /* Create bioset and page pool. */
     // EUGEBE: bioset_create() replaced with bioset_init()
     // rd->bioset = bioset_create(ERASER_BIOSET_SIZE, 0);
-    ret = bioset_init(rd->bioset, ERASER_BIOSET_SIZE, 0, BIOSET_NEED_BVECS);
+    BUG_ON(rd == NULL);
+    DMINFO("Creating bioset");
+    ret = bioset_init(&rd->bioset, ERASER_BIOSET_SIZE, 0, BIOSET_NEED_BVECS);
     if (ret != 0) {
         ti->error = "Could not create bioset.";
         goto create_bioset_fail;
     }
+    DMINFO("Created bioset");
 
+    DMINFO("Creating page pool");
     rd->page_pool = mempool_create_page_pool(ERASER_PAGE_POOL_SIZE, 0);
     if (!rd->page_pool) {
         ti->error = "Could not create page pool.";
         goto create_page_pool_fail;
     }
+    DMINFO("Created page pool");
 
     /* Read header from disk. */
     // TODO allocate this (for multiple lengths, too) and handle failure
@@ -2877,7 +2884,7 @@ create_io_cache_fail:
 read_header_fail:
     mempool_destroy(rd->page_pool);
 create_page_pool_fail:
-    bioset_exit(rd->bioset);
+    bioset_exit(&rd->bioset);
 create_bioset_fail:
     kfree(rd->prg_input);
 init_prg_input_fail:
@@ -2970,7 +2977,7 @@ static void eraser_dtr(struct dm_target *ti) {
     kmem_cache_destroy(rd->_io_work_pool);
 
     mempool_destroy(rd->page_pool);
-    bioset_exit(rd->bioset);
+    bioset_exit(&rd->bioset);
 
     kfree(rd->prg_input);
     crypto_free_shash(rd->sha_tfm);

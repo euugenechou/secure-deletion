@@ -25,26 +25,26 @@ mkfs.ext4 /dev/mapper/holepunch
 mount /dev/mapper/holepunch $MOUNT
 cd $MOUNT
 
-# echo hello > hi
-# echo foo > bar
-# echo barbar > baz
-# sync
-# cat hi
-# cat bar
-# cat baz
-# rm hi
-# cd ..
-# umount $MOUNT
+echo hello > hi
+echo foo > bar
+echo barbar > baz
+sync
+cat hi
+cat bar
+cat baz
+rm hi
+cd ..
+umount $MOUNT
 
-# mount /dev/mapper/holepunch $MOUNT
-# cd $MOUNT
-# ls
-# cat bar
-# cat baz
-# echo yellow > hi
-# cd ..
-# umount $MOUNT
-# $EXEC close test
+mount /dev/mapper/holepunch $MOUNT
+cd $MOUNT
+ls
+cat bar
+cat baz
+echo yellow > hi
+cd ..
+umount $MOUNT
+$EXEC close test
 
 # printf "ooo\no" | $EXEC open $DEVICE test
 # mount /dev/mapper/holepunch $MOUNT
