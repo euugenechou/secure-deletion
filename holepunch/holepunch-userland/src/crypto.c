@@ -23,6 +23,8 @@
 
 #include "crypto.h"
 
+#include <string.h>
+
 /*
  * Encryption functions.
  */
@@ -132,13 +134,44 @@ void decrypt(char *src, char *dst, u64 buf_len, char *key, char *iv) {
 }
 
 /* Derives a key from a password with PBKDF2 - SHA256. */
-void generate_key(char *pass, int key_len, char *key, char *salt, int salt_len) {
-    PKCS5_PBKDF2_HMAC(pass, strlen(pass), salt, salt_len, ERASER_PBKDF2_ITER, EVP_sha256(), key_len, key);
+void generate_key(
+    char *pass,
+    int key_len,
+    char *key,
+    char *salt,
+    int salt_len
+) {
+    PKCS5_PBKDF2_HMAC(
+        pass,
+        strlen(pass),
+        salt,
+        salt_len,
+        ERASER_PBKDF2_ITER,
+        EVP_sha256(),
+        key_len,
+        key
+    );
 }
 
 /* Reuses PBKDF2 to generate key digest. */
-void digest_key(char *in, int in_len, char *out, int out_len, char *salt, int salt_len) {
-    PKCS5_PBKDF2_HMAC(in, in_len, salt, salt_len, ERASER_PBKDF2_ITER, EVP_sha256(), out_len, out);
+void digest_key(
+    char *in,
+    int in_len,
+    char *out,
+    int out_len,
+    char *salt,
+    int salt_len
+) {
+    PKCS5_PBKDF2_HMAC(
+        in,
+        in_len,
+        salt,
+        salt_len,
+        ERASER_PBKDF2_ITER,
+        EVP_sha256(),
+        out_len,
+        out
+    );
 }
 
 /* Initializes OpenSSL. */

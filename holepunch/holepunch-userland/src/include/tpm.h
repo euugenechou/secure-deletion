@@ -24,13 +24,13 @@
 #ifndef TPM_H
 #define TPM_H
 
+// #include <trousers/trousers.h>
 #include <tss/platform.h>
-#include <tss/tss_defines.h>
-#include <tss/tss_typedef.h>
-#include <tss/tss_structs.h>
 #include <tss/tspi.h>
+#include <tss/tss_defines.h>
 #include <tss/tss_error.h>
-#include <trousers/trousers.h>
+#include <tss/tss_structs.h>
+#include <tss/tss_typedef.h>
 
 struct eraser_tpm {
     TSS_HCONTEXT context;

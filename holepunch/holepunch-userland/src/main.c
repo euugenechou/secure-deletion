@@ -21,10 +21,10 @@
  * ERASER Userland Tool.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
 #include <argp.h>
+#include <assert.h>
+#include <signal.h>
+#include <stdlib.h>
 
 #include "holepunch.h"
 
@@ -45,10 +45,9 @@ const char *argp_program_version = "ERASER ver.2016.xx.xx";
 const char *argp_program_bug_address = "<onarliog@ccs.neu.edu>";
 static const char doc[] = "Create, open, close, list ERASER devices.";
 static const char args_doc[] =
-    COMMAND_CREATE  " <block-device> <tpm-nvram-index>\n"
-    COMMAND_OPEN    " <block-device> <eraser-name>\n"
-    COMMAND_CLOSE   " <eraser-name>\n"
-    COMMAND_LIST    "\n";
+    COMMAND_CREATE " <block-device> <tpm-nvram-index>\n" COMMAND_OPEN
+                   " <block-device> <eraser-name>\n" COMMAND_CLOSE
+                   " <eraser-name>\n" COMMAND_LIST "\n";
 
 static struct argp_option options[] = {
     {"device-name", 'd', "<mapped-device-name>", 0, "Mapped device name"},
@@ -61,35 +60,42 @@ struct arguments {
 };
 
 static error_t parse_arguments(int key, char *arg, struct argp_state *state) {
-
     struct arguments *arguments = state->input;
 
     switch (key) {
-    case 'd':
-        arguments->mapped_dev = arg;
-        break;
-    case ARGP_KEY_ARG:
-        if ((state->arg_num > 2 && strcmp(arguments->args[0], COMMAND_OPEN) == 0) ||
-            (state->arg_num > 2 && strcmp(arguments->args[0], COMMAND_CREATE) == 0) ||
-            (state->arg_num > 1 && strcmp(arguments->args[0], COMMAND_CLOSE) == 0) ||
-            (state->arg_num > 0 && strcmp(arguments->args[0], COMMAND_LIST) == 0)){
-            /* Too many arguments. */
-            argp_usage(state);
-        }
-        arguments->args[state->arg_num] = arg;
-        break;
-    case ARGP_KEY_END:
-        if (state->arg_num == 0 ||
-            (state->arg_num < 1 && strcmp(arguments->args[0], COMMAND_LIST) == 0) ||
-            (state->arg_num < 3 && strcmp(arguments->args[0], COMMAND_CREATE) == 0) ||
-            (state->arg_num < 2 && strcmp(arguments->args[0], COMMAND_CLOSE) == 0) ||
-            (state->arg_num < 3 && strcmp(arguments->args[0], COMMAND_OPEN) == 0)) {
-            /* Missing arguments. */
-            argp_usage(state);
-        }
-        break;
-    default:
-        return ARGP_ERR_UNKNOWN;
+        case 'd':
+            arguments->mapped_dev = arg;
+            break;
+        case ARGP_KEY_ARG:
+            if ((state->arg_num > 2
+                 && strcmp(arguments->args[0], COMMAND_OPEN) == 0)
+                || (state->arg_num > 2
+                    && strcmp(arguments->args[0], COMMAND_CREATE) == 0)
+                || (state->arg_num > 1
+                    && strcmp(arguments->args[0], COMMAND_CLOSE) == 0)
+                || (state->arg_num > 0
+                    && strcmp(arguments->args[0], COMMAND_LIST) == 0)) {
+                /* Too many arguments. */
+                argp_usage(state);
+            }
+            arguments->args[state->arg_num] = arg;
+            break;
+        case ARGP_KEY_END:
+            if (state->arg_num == 0
+                || (state->arg_num < 1
+                    && strcmp(arguments->args[0], COMMAND_LIST) == 0)
+                || (state->arg_num < 3
+                    && strcmp(arguments->args[0], COMMAND_CREATE) == 0)
+                || (state->arg_num < 2
+                    && strcmp(arguments->args[0], COMMAND_CLOSE) == 0)
+                || (state->arg_num < 3
+                    && strcmp(arguments->args[0], COMMAND_OPEN) == 0)) {
+                /* Missing arguments. */
+                argp_usage(state);
+            }
+            break;
+        default:
+            return ARGP_ERR_UNKNOWN;
     }
     return 0;
 }
@@ -98,7 +104,6 @@ static struct argp arg_parser = {options, parse_arguments, args_doc, doc};
 struct arguments arguments;
 
 int main(int argc, char **argv) {
-
     assert(sizeof(struct eraser_header) < ERASER_SECTOR);
     assert((ERASER_SECTOR % sizeof(struct eraser_map_entry)) == 0);
 
@@ -112,25 +117,22 @@ int main(int argc, char **argv) {
 
     /* Command dispatcher. */
     if (strcmp(arguments.args[0], COMMAND_CREATE) == 0) {
-
         print_green("Creating HOLEPUNCH on %s\n", arguments.args[1]);
         do_create(arguments.args[1], atoi(arguments.args[2]));
-    }
-    else if (strcmp(arguments.args[0], COMMAND_OPEN) == 0) {
-
-        print_green("Opening HOLEPUNCH device %s on %s\n", arguments.args[2], arguments.args[1]);
+    } else if (strcmp(arguments.args[0], COMMAND_OPEN) == 0) {
+        print_green(
+            "Opening HOLEPUNCH device %s on %s\n",
+            arguments.args[2],
+            arguments.args[1]
+        );
         do_open(arguments.args[1], arguments.args[2], arguments.mapped_dev);
-    }
-    else if (strcmp(arguments.args[0], COMMAND_CLOSE) == 0) {
-
+    } else if (strcmp(arguments.args[0], COMMAND_CLOSE) == 0) {
         print_green("Closing HOLEPUNCH device %s \n", arguments.args[1]);
         do_close(arguments.args[1]);
-    }
-    else if (strcmp(arguments.args[0], COMMAND_LIST) == 0) {
+    } else if (strcmp(arguments.args[0], COMMAND_LIST) == 0) {
         print_green("Listing open HOLEPUNCH devices.\n");
         do_list();
-    }
-    else {
+    } else {
         die("Unknown command: %s\n", arguments.args[0]);
     }
 

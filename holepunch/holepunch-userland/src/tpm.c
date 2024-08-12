@@ -21,25 +21,32 @@
  * ERASER TPM interface.
  */
 
-#include "utils.h"
-#include "holepunch.h"
 #include "tpm.h"
 
 /* If defined, use simple file I/O instead of a TPM chip. For testing only. */
 #ifdef ERASER_NO_TPM
 
+    #include <assert.h>
+
+    #include "holepunch.h"
+
 void check_tpm_success(TSS_RESULT r) {}
-struct eraser_tpm *setup_tpm(char *owner_pass) { return NULL; }
+struct eraser_tpm *setup_tpm(char *owner_pass) {
+    return NULL;
+}
 void cleanup_nvram(struct eraser_nvram *n) {}
 void cleanup_tpm(struct eraser_tpm *t) {}
 
-struct eraser_nvram *setup_nvram(unsigned index, int len, char *owner_pass, struct eraser_tpm *t ) { return NULL; }
+struct eraser_nvram *
+setup_nvram(unsigned index, int len, char *owner_pass, struct eraser_tpm *t) {
+    return NULL;
+}
 
 TSS_RESULT write_nvram(struct eraser_nvram *n, unsigned char *data) {
     int f;
 
-    f = open("/tmp/tpm_test", O_RDWR | O_CREAT);
-    write(f, data, HOLEPUNCH_KEY_LEN);
+    f = open("/tmp/tpm_test", O_RDWR | O_CREAT, 0600);
+    assert(write(f, data, HOLEPUNCH_KEY_LEN) == HOLEPUNCH_KEY_LEN);
     close(f);
     return TSS_SUCCESS;
 }
@@ -49,12 +56,14 @@ TSS_RESULT read_nvram(struct eraser_nvram *n, unsigned char **out) {
 
     f = open("/tmp/tpm_test", O_RDWR);
     *out = malloc(HOLEPUNCH_KEY_LEN);
-    read(f, *out, HOLEPUNCH_KEY_LEN);
+    assert(read(f, *out, HOLEPUNCH_KEY_LEN) == HOLEPUNCH_KEY_LEN);
     close(f);
     return TSS_SUCCESS;
 }
 
-TSS_RESULT release_nvram(struct eraser_nvram *n) { return TSS_SUCCESS; }
+TSS_RESULT release_nvram(struct eraser_nvram *n) {
+    return TSS_SUCCESS;
+}
 
 #else
 
@@ -88,7 +97,12 @@ struct eraser_tpm *setup_tpm(char *owner_pass) {
     r = Tspi_GetPolicyObject(t, TSS_POLICY_USAGE, &p);
     check_tpm_success(r);
 
-    r = Tspi_Policy_SetSecret(p, TSS_SECRET_MODE_PLAIN, strlen(owner_pass), owner_pass);
+    r = Tspi_Policy_SetSecret(
+        p,
+        TSS_SECRET_MODE_PLAIN,
+        strlen(owner_pass),
+        owner_pass
+    );
     check_tpm_success(r);
 
     /* Setup complete. */
@@ -115,8 +129,8 @@ void cleanup_tpm(struct eraser_tpm *t) {
     t = NULL;
 }
 
-struct eraser_nvram *setup_nvram(unsigned index, int len, char *owner_pass, struct eraser_tpm *t ) {
-
+struct eraser_nvram *
+setup_nvram(unsigned index, int len, char *owner_pass, struct eraser_tpm *t) {
     TSS_HNVSTORE n;
     TSS_HPOLICY p;
     TSS_RESULT r;
@@ -133,8 +147,12 @@ struct eraser_nvram *setup_nvram(unsigned index, int len, char *owner_pass, stru
     r = Tspi_SetAttribUint32(n, TSS_TSPATTRIB_NV_DATASIZE, 0, len);
     check_tpm_success(r);
 
-    r = Tspi_SetAttribUint32(n, TSS_TSPATTRIB_NV_PERMISSIONS, 0,
-                                TPM_NV_PER_OWNERREAD | TPM_NV_PER_OWNERWRITE);
+    r = Tspi_SetAttribUint32(
+        n,
+        TSS_TSPATTRIB_NV_PERMISSIONS,
+        0,
+        TPM_NV_PER_OWNERREAD | TPM_NV_PER_OWNERWRITE
+    );
     check_tpm_success(r);
 
     /* Try to define space, maybe it does not exist. */
@@ -146,10 +164,20 @@ struct eraser_nvram *setup_nvram(unsigned index, int len, char *owner_pass, stru
     }
 
     /* Set owner pass. */
-    r = Tspi_Context_CreateObject(t->context, TSS_OBJECT_TYPE_POLICY, TSS_POLICY_USAGE, &p);
+    r = Tspi_Context_CreateObject(
+        t->context,
+        TSS_OBJECT_TYPE_POLICY,
+        TSS_POLICY_USAGE,
+        &p
+    );
     check_tpm_success(r);
 
-    r = Tspi_Policy_SetSecret(p, TSS_SECRET_MODE_PLAIN, strlen(owner_pass), owner_pass);
+    r = Tspi_Policy_SetSecret(
+        p,
+        TSS_SECRET_MODE_PLAIN,
+        strlen(owner_pass),
+        owner_pass
+    );
     check_tpm_success(r);
 
     r = Tspi_Policy_AssignToObject(p, n);

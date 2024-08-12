@@ -24,18 +24,13 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <error.h>
+#include <fcntl.h>
+#include <stdint.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <stdint.h>
-#include <string.h>
-#include <time.h>
+#include <unistd.h>
 
 /*
  * We need to know how large our integers are.
@@ -53,25 +48,23 @@ typedef uint64_t u64;
 #define GREEN "\x1B[32m"
 
 /* Print in color. */
-#define print_color(color, fmt, ...)                \
-    do {                                            \
-        printf(color fmt NORMAL, ##__VA_ARGS__);    \
-        fflush(stdout);                             \
+#define print_color(color, fmt, ...)             \
+    do {                                         \
+        printf(color fmt NORMAL, ##__VA_ARGS__); \
+        fflush(stdout);                          \
     } while (0)
 
 /* Print in red. */
-#define print_red(fmt, ...)                     \
-    print_color(RED, fmt, ##__VA_ARGS__)
+#define print_red(fmt, ...) print_color(RED, fmt, ##__VA_ARGS__)
 
 /* Print in green. */
-#define print_green(fmt, ...)                   \
-    print_color(GREEN, fmt, ##__VA_ARGS__)
+#define print_green(fmt, ...) print_color(GREEN, fmt, ##__VA_ARGS__)
 
 /* Print error message and exit. */
-#define die(fmt, ...)                               \
-    do {                                            \
-        print_red(fmt NORMAL, ##__VA_ARGS__);       \
-        exit(1);                                    \
+#define die(fmt, ...)                         \
+    do {                                      \
+        print_red(fmt NORMAL, ##__VA_ARGS__); \
+        exit(1);                              \
     } while (0)
 
 /* Div up shortcut. */
@@ -93,8 +86,8 @@ char *read_text_file(char *, unsigned *);
 unsigned char *hex_encode(unsigned char *, unsigned len);
 
 /* Disk write helpers. */
-#define ERASER_SECTOR 4096  /* In bytes. */
-#define ERASER_IO_SIZE 1    /* In sectors. */
+#define ERASER_SECTOR 4096 /* In bytes. */
+#define ERASER_IO_SIZE 1 /* In sectors. */
 void write_sectors(int, void *, unsigned);
 void read_sectors(int, void *, unsigned);
 void write_bytes(int, void *, unsigned);

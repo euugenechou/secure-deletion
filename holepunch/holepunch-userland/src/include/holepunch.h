@@ -24,30 +24,31 @@
 #define ERASER_H
 
 #include <libdevmapper.h> /* Devmapper ioctl interface. */
-#include <termios.h>      /* To disable terminal echoing for password prompt. */
 #include <linux/fs.h>
-#include <signal.h>
+#include <termios.h> /* To disable terminal echoing for password prompt. */
 
 #include "utils.h"
 
 #define ERASER_TARGET "eraser"
 #define ERASER_DEV_PATH "/dev/mapper/"
 
-#define ERASER_SECTOR 4096   /* In bytes. */
-#define ERASER_HEADER_LEN 1  /* In blocks. */
-#define ERASER_KEY_LEN 32    /* In bytes. */
-#define ERASER_IV_LEN 16     /* In bytes. */
-#define ERASER_SALT_LEN 32   /* In bytes. */
+#define ERASER_SECTOR 4096 /* In bytes. */
+#define ERASER_HEADER_LEN 1 /* In blocks. */
+#define ERASER_KEY_LEN 32 /* In bytes. */
+#define ERASER_IV_LEN 16 /* In bytes. */
+#define ERASER_SALT_LEN 32 /* In bytes. */
 #define ERASER_DIGEST_LEN 32 /* In bytes. */
-#define ERASER_NAME_LEN 16   /* ERASER instance name. */
+#define ERASER_NAME_LEN 16 /* ERASER instance name. */
 /* 64 should be large enough for most purposes and may in fact be too large. */
-#define HP_JOURNAL_LEN 64    /* In blocks. */
+#define HP_JOURNAL_LEN 64 /* In blocks. */
 
 #define HOLEPUNCH_PROC_FILE "/proc/holepunchtab"
 
 #define PRG_INPUT_LEN 32
 // The key growth is the PPRF depth times this value
-#define HOLEPUNCH_KEY_GROWTH_MULT  2
+#define HOLEPUNCH_KEY_GROWTH_MULT 2
+// Not sure where this was supposed to be defined
+#define HOLEPUNCH_KEY_LEN ERASER_KEY_LEN
 /* now in makefile */
 // #define HOLEPUNCH_REFRESH_INTERVAL 2
 
@@ -57,10 +58,9 @@
 /* These are just the default values for ext4. Good enough, for now. */
 #define ERASER_BYTES_PER_INODE_RATIO 16384
 
-
 #define MAX_DEPTH 64
 #ifdef ERASER_DEBUG
-#define NODE_LABEL_LEN (MAX_DEPTH+7)/8
+    #define NODE_LABEL_LEN (MAX_DEPTH + 7) / 8
 struct node_label {
     u64 label;
     char depth;
@@ -81,14 +81,13 @@ struct pprf_keynode {
 #endif
 };
 
-
 /* Must match the kernel side definition. */
 struct eraser_header {
-    char enc_key[HOLEPUNCH_KEY_LEN];           /* Encrypted disk sector encryption key. */
+    char enc_key[HOLEPUNCH_KEY_LEN]; /* Encrypted disk sector encryption key. */
     char enc_key_digest[ERASER_DIGEST_LEN]; /* External key digest. */
-    char enc_key_salt[ERASER_SALT_LEN];     /* External key salt. */
-    char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-    char slot_map_iv[ERASER_IV_LEN];        /* IV for slot map encryption. */
+    char enc_key_salt[ERASER_SALT_LEN]; /* External key salt. */
+    char pass_salt[ERASER_SALT_LEN]; /* Password salt. */
+    char slot_map_iv[ERASER_IV_LEN]; /* IV for slot map encryption. */
 
     u64 nv_index; /* TPM NVRAM index to store the master key in. */
 
@@ -102,14 +101,13 @@ struct eraser_header {
     u64 data_len;
 };
 
-
 /* Holepunch header; must match the definition in kernel. */
 struct holepunch_header {
-    char enc_key[HOLEPUNCH_KEY_LEN];           /* Encrypted sector encryption key. */
+    char enc_key[HOLEPUNCH_KEY_LEN]; /* Encrypted sector encryption key. */
     char enc_key_digest[ERASER_DIGEST_LEN]; /* Key digest. */
-    char enc_key_salt[ERASER_SALT_LEN];     /* Key salt. */
-    char pass_salt[ERASER_SALT_LEN];        /* Password salt. */
-    u64 nv_index;                         /* Master key TPM NVRAM index. */
+    char enc_key_salt[ERASER_SALT_LEN]; /* Key salt. */
+    char pass_salt[ERASER_SALT_LEN]; /* Password salt. */
+    u64 nv_index; /* Master key TPM NVRAM index. */
 
     /* IV generation key, encrypted by master key. */
     char iv_key[HOLEPUNCH_KEY_LEN];
@@ -149,9 +147,9 @@ struct holepunch_key {
 #define HPJ_PPRF_INIT 3UL
 #define HPJ_GENERIC 4UL
 
-#define HP_KEY_PER_SECTOR ((ERASER_SECTOR - 32)/ERASER_KEY_LEN)
-#define HP_PPRF_PER_SECTOR (ERASER_SECTOR/sizeof(struct pprf_keynode))
-#define HP_FKT_PER_SECTOR (ERASER_SECTOR/ERASER_KEY_LEN)
+#define HP_KEY_PER_SECTOR ((ERASER_SECTOR - 32) / HOLEPUNCH_KEY_LEN)
+#define HP_PPRF_PER_SECTOR (ERASER_SECTOR / sizeof(struct pprf_keynode))
+#define HP_FKT_PER_SECTOR (ERASER_SECTOR / HOLEPUNCH_KEY_LEN)
 
 struct __attribute__((aligned(ERASER_SECTOR))) holepunch_filekey_sector {
     u64 tag;
@@ -169,8 +167,6 @@ struct __attribute__((aligned(ERASER_SECTOR))) holepunch_pprf_fkt_sector {
     struct holepunch_key entries[HP_FKT_PER_SECTOR];
 };
 
-
-
 /* size padded to 64 bytes, must be multiple of sector size */
 struct eraser_map_entry {
     unsigned char key[HOLEPUNCH_KEY_LEN];
@@ -178,8 +174,6 @@ struct eraser_map_entry {
     u64 status;
     u64 padding;
 };
-
-
 
 void handle_signal(int);
 
@@ -190,13 +184,12 @@ void hp_get_keys(int, struct holepunch_header *);
 int hp_verify_key(struct holepunch_header *);
 void cleanup_keys();
 
-
 void do_init_filekeys(int, struct holepunch_header *, u64);
 
 /* Actual commands. */
 int close_eraser(char *);
 void do_close(char *);
-int open_eraser(char *, char *, u64, char*, char*, int);
+int open_eraser(char *, char *, u64, char *, char *, int);
 void do_open(char *, char *, char *);
 void do_create(char *, int);
 void do_list();

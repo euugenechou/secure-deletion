@@ -21,12 +21,14 @@
  * ERASER core.
  */
 
-#include "utils.h"
+#include "holepunch.h"
+
+#include <signal.h>
+
 #include "crypto.h"
 #include "netlink.h"
-#include "holepunch.h"
 #include "tpm.h"
-
+#include "utils.h"
 
 void handle_signal(int sig) {
     if (sig == SIGTERM) {
@@ -35,7 +37,6 @@ void handle_signal(int sig) {
         exit(1);
     }
 }
-
 
 char enc_key[HOLEPUNCH_KEY_LEN];
 char *tpm_owner_pass = NULL;
@@ -99,7 +100,13 @@ void get_keys(int op, struct eraser_header *h) {
     if (op == ERASER_CREATE) {
         get_random_data(h->pass_salt, ERASER_SALT_LEN);
     }
-    generate_key(pass, HOLEPUNCH_KEY_LEN, pass_key, h->pass_salt, ERASER_SALT_LEN);
+    generate_key(
+        pass,
+        HOLEPUNCH_KEY_LEN,
+        pass_key,
+        h->pass_salt,
+        ERASER_SALT_LEN
+    );
     memset(pass, 0, strlen(pass));
     free(pass);
     printf("\n");
@@ -114,7 +121,14 @@ void get_keys(int op, struct eraser_header *h) {
         /* Store encrypted disk encryption key in the header. */
         encrypt(enc_key, h->enc_key, HOLEPUNCH_KEY_LEN, pass_key, 0);
         get_random_data(h->enc_key_salt, ERASER_SALT_LEN);
-        digest_key(enc_key, HOLEPUNCH_KEY_LEN, h->enc_key_digest, ERASER_DIGEST_LEN, h->enc_key_salt, ERASER_SALT_LEN);
+        digest_key(
+            enc_key,
+            HOLEPUNCH_KEY_LEN,
+            h->enc_key_digest,
+            ERASER_DIGEST_LEN,
+            h->enc_key_salt,
+            ERASER_SALT_LEN
+        );
 
     } else {
         /* Decrypt the disk encryption key. */
@@ -127,25 +141,30 @@ void get_keys(int op, struct eraser_header *h) {
 
 /* Decrypt and verify the key. */
 int verify_key(struct eraser_header *h) {
-
     char digest[ERASER_DIGEST_LEN];
 
-    digest_key(enc_key, HOLEPUNCH_KEY_LEN, digest, ERASER_DIGEST_LEN, h->enc_key_salt, ERASER_SALT_LEN);
-    if(memcmp(digest, h->enc_key_digest, ERASER_DIGEST_LEN) != 0) {
+    digest_key(
+        enc_key,
+        HOLEPUNCH_KEY_LEN,
+        digest,
+        ERASER_DIGEST_LEN,
+        h->enc_key_salt,
+        ERASER_SALT_LEN
+    );
+    if (memcmp(digest, h->enc_key_digest, ERASER_DIGEST_LEN) != 0) {
         return 0;
     }
 
     return 1;
 }
 
-
 /* THIS ONLY WORKS IF WE KEEP THE FIRST 5 ENTRIES IDENTICAL TO ERASER */
 void hp_get_keys(int op, struct holepunch_header *h) {
-    get_keys(op, (struct eraser_header*) h);
+    get_keys(op, (struct eraser_header *)h);
 }
 
 int hp_verify_key(struct holepunch_header *h) {
-    return verify_key((struct eraser_header*)h);
+    return verify_key((struct eraser_header *)h);
 }
 
 /* Clean the key memory. */
@@ -162,7 +181,6 @@ void cleanup_keys() {
 
 /* Closes a ERASER instance by device-mapper name. */
 int close_eraser(char *mapped_dev) {
-
     struct dm_task *dmt;
     u32 cookie = 0;
     u16 udev_flags = 0;
@@ -170,7 +188,8 @@ int close_eraser(char *mapped_dev) {
 
     print_green("Closing: %s\n", mapped_dev);
 #ifdef ERASER_NO_UDEV
-    udev_flags |= DM_UDEV_DISABLE_DM_RULES_FLAG | DM_UDEV_DISABLE_SUBSYSTEM_RULES_FLAG;
+    udev_flags |=
+        DM_UDEV_DISABLE_DM_RULES_FLAG | DM_UDEV_DISABLE_SUBSYSTEM_RULES_FLAG;
     dm_udev_set_sync_support(0);
 #endif
 
@@ -210,7 +229,6 @@ out:
 
 /* Closes a ERASER instance. */
 void do_close(char *eraser_name) {
-
     char *buf;
     char *tok_buf;
     char *tok;
@@ -233,12 +251,10 @@ void do_close(char *eraser_name) {
     /* Check all open ERASER instances. */
     done = 0;
     while (!done && (tok = strsep(&tok_buf, " "))) {
-
         if (strcmp(tok, eraser_name) != 0) {
             /* This is not what we are looking for. */
             strsep(&tok_buf, "\n"); /* Skip to the end of line. */
-        }
-        else {
+        } else {
             /* Found! */
             strsep(&tok_buf, " ");
             name = rindex(strsep(&tok_buf, " "), '/') + 1;
@@ -259,8 +275,14 @@ void do_close(char *eraser_name) {
 }
 
 /* Device mapper open. */
-int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, char *mapped_dev_path, int netlink_pid) {
-
+int open_eraser(
+    char *dev_path,
+    char *mapped_dev,
+    u64 len,
+    char *eraser_name,
+    char *mapped_dev_path,
+    int netlink_pid
+) {
     struct dm_task *dmt;
     u32 cookie = 0;
     u16 udev_flags = 0;
@@ -269,7 +291,8 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
     char *hex_key;
 
 #ifdef ERASER_NO_UDEV
-    udev_flags |= DM_UDEV_DISABLE_DM_RULES_FLAG | DM_UDEV_DISABLE_SUBSYSTEM_RULES_FLAG;
+    udev_flags |=
+        DM_UDEV_DISABLE_DM_RULES_FLAG | DM_UDEV_DISABLE_SUBSYSTEM_RULES_FLAG;
     dm_udev_set_sync_support(0);
 #endif
 
@@ -277,20 +300,34 @@ int open_eraser(char *dev_path, char *mapped_dev, u64 len, char *eraser_name, ch
     hex_key = hex_encode(enc_key, HOLEPUNCH_KEY_LEN);
 
     /* These parameters will be passed to the kernel module. */
-    snprintf(param, 4096, "%s %s %s %s %d\n",
-             dev_path, eraser_name, hex_key, mapped_dev_path, netlink_pid);
+    snprintf(
+        param,
+        4096,
+        "%s %s %s %s %d\n",
+        dev_path,
+        eraser_name,
+        hex_key,
+        mapped_dev_path,
+        netlink_pid
+    );
 
     if (!(dmt = dm_task_create(DM_DEVICE_CREATE))) {
         print_red("DEBUG: Cannot create dm_task\n");
         return 0;
     }
-    
+
     if (!dm_task_set_name(dmt, mapped_dev)) {
         print_red("DEBUG: Cannot set device name\n");
         goto out;
     }
 
-    if (!dm_task_add_target(dmt, 0, len * (ERASER_SECTOR / 512), ERASER_TARGET, param)) {
+    if (!dm_task_add_target(
+            dmt,
+            0,
+            len * (ERASER_SECTOR / 512),
+            ERASER_TARGET,
+            param
+        )) {
         goto out;
     }
 
@@ -350,11 +387,11 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     /* Read header. */
     buf = malloc(ERASER_HEADER_LEN * ERASER_SECTOR);
     read_sectors(fd, buf, ERASER_HEADER_LEN);
-    hp_h = (struct holepunch_header *) buf;
+    hp_h = (struct holepunch_header *)buf;
 
     /* Get password from user and check if correct. */
     hp_get_keys(ERASER_OPEN, hp_h);
-    if(!hp_verify_key(hp_h)) {
+    if (!hp_verify_key(hp_h)) {
         print_red("Incorrect password!\n");
         goto free_headers;
     }
@@ -372,7 +409,14 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
     netlink_pid = start_netlink_client(eraser_name);
     if (netlink_pid != 0) {
         /* Device-mapper open. */
-        if (!open_eraser(dev_path, mapped_dev, hp_h->data_end - hp_h->data_start, eraser_name, mapped_dev_path, netlink_pid)) {
+        if (!open_eraser(
+                dev_path,
+                mapped_dev,
+                hp_h->data_end - hp_h->data_start,
+                eraser_name,
+                mapped_dev_path,
+                netlink_pid
+            )) {
             print_red("Cannot open ERASER device!\n");
             kill(netlink_pid, SIGTERM);
             goto free_name;
@@ -381,17 +425,15 @@ void do_open(char *dev_path, char *eraser_name, char *mapped_dev) {
         print_green("Success!\n");
     }
 
-    #ifdef ERASER_DEBUG
-        print_green("Journal start: %llu\n", hp_h->journal_start);
-        print_green("Key table start: %llu\n", hp_h->key_table_start);
-        print_green("PPRF fkt start: %llu\n", hp_h->fkt_start);
-        print_green("PPRF key start: %llu\n", hp_h->pprf_start);
-        print_green("PPRF key max elts: %llu\n", hp_h->pprf_capacity);
-        print_green("Data start: %llu\n", hp_h->data_start);
-        print_green("Data end: %llu\n", hp_h->data_end);
-    #endif
-
-
+#ifdef ERASER_DEBUG
+    print_green("Journal start: %llu\n", hp_h->journal_start);
+    print_green("Key table start: %llu\n", hp_h->key_table_start);
+    print_green("PPRF fkt start: %llu\n", hp_h->fkt_start);
+    print_green("PPRF key start: %llu\n", hp_h->pprf_start);
+    print_green("PPRF key max elts: %llu\n", hp_h->pprf_capacity);
+    print_green("Data start: %llu\n", hp_h->data_start);
+    print_green("Data end: %llu\n", hp_h->data_end);
+#endif
 
 free_name:
     free(mapped_dev_path);
@@ -404,7 +446,6 @@ free_headers:
 
 /* Start netlink client. */
 int start_netlink_client(char *eraser_name) {
-
     int pid;
 
     pid = fork();
@@ -412,14 +453,13 @@ int start_netlink_client(char *eraser_name) {
         return pid;
     }
 
-    enter_netlink_loop(); /* There is no return until ERASER device is closed. */
+    enter_netlink_loop(
+    ); /* There is no return until ERASER device is closed. */
     return pid;
 }
 
-
 /* Create a ERASER instance. */
 void do_create(char *dev_path, int nv_index) {
-
     // struct eraser_header *h;
     unsigned char master_key[HOLEPUNCH_KEY_LEN];
     u64 dev_size;
@@ -443,7 +483,10 @@ void do_create(char *dev_path, int nv_index) {
 #ifdef ERASER_DEBUG
     print_green("Device size is %llu bytes\n", dev_size);
     print_green("-> ERASER sectors: %llu\n", dev_size / ERASER_SECTOR);
-    print_green("-> Expecting %llu inodes for an ext4 partition\n\n", inode_count);
+    print_green(
+        "-> Expecting %llu inodes for an ext4 partition\n\n",
+        inode_count
+    );
 #endif
     /* Compute sizes for holepunch metadata */
     struct holepunch_header *hp_h = malloc(ERASER_SECTOR * ERASER_HEADER_LEN);
@@ -451,8 +494,10 @@ void do_create(char *dev_path, int nv_index) {
 
     /* The depth of the pprf is chosen such that num leaves is at least the
      * number of files + number of punctures before refresh is forced */
-    hp_h->pprf_depth = 32 - __builtin_clz(key_table_len + HOLEPUNCH_REFRESH_INTERVAL);
-    hp_h->pprf_capacity = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH_MULT * hp_h->pprf_depth;
+    hp_h->pprf_depth =
+        32 - __builtin_clz(key_table_len + HOLEPUNCH_REFRESH_INTERVAL);
+    hp_h->pprf_capacity = HOLEPUNCH_REFRESH_INTERVAL * HOLEPUNCH_KEY_GROWTH_MULT
+        * hp_h->pprf_depth;
     u64 pprf_len = div_ceil(hp_h->pprf_capacity, HP_PPRF_PER_SECTOR);
 
     hp_h->journal_start = ERASER_HEADER_LEN;
@@ -460,14 +505,15 @@ void do_create(char *dev_path, int nv_index) {
     hp_h->fkt_start = hp_h->key_table_start + key_table_len;
     hp_h->fkt_bottom_width = div_ceil(pprf_len, HP_FKT_PER_SECTOR);
     hp_h->fkt_top_width = div_ceil(hp_h->fkt_bottom_width, HP_FKT_PER_SECTOR);
-    hp_h->pprf_start = hp_h->fkt_start + hp_h->fkt_bottom_width + hp_h->fkt_top_width;
+    hp_h->pprf_start =
+        hp_h->fkt_start + hp_h->fkt_bottom_width + hp_h->fkt_top_width;
     hp_h->data_start = hp_h->pprf_start + pprf_len;
     hp_h->data_end = dev_size / ERASER_SECTOR;
     // hp_h->pprf_size = 1;
     hp_h->in_use = 0;
-// #ifdef ERASER_DEBUG
+    // #ifdef ERASER_DEBUG
     print_green("-> Holepunch PPRF depth: %u\n\n", hp_h->pprf_depth);
-// #endif
+    // #endif
 
 #ifdef ERASER_DEBUG
     print_green("Journal start: %llu\n", hp_h->journal_start);

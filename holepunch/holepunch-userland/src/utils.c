@@ -23,11 +23,14 @@
 
 #include "utils.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 static int eraser_random;
 
 /* Div up */
 u64 div_ceil(u64 n, u64 d) {
-    return (n + d - 1) /  d;
+    return (n + d - 1) / d;
 }
 
 /*
@@ -36,7 +39,6 @@ u64 div_ceil(u64 n, u64 d) {
 
 /* Fill a buffer with random bytes. */
 void get_random_data(void *data, unsigned len) {
-
     ssize_t r;
 
     r = read(eraser_random, data, len);
@@ -71,12 +73,18 @@ void cleanup_random() {
  *
  * Return: the pointer to the new larger buffer
  */
-void *try_realloc(void *buf, unsigned cur, unsigned *max,
-                   unsigned inc, unsigned size) {
+void *try_realloc(
+    void *buf,
+    unsigned cur,
+    unsigned *max,
+    unsigned inc,
+    unsigned size
+) {
     void *new_buf;
     if (cur == *max) {
         new_buf = realloc(buf, (*max + inc) * size);
-        if(!new_buf) die( "Realloc failed.\n");
+        if (!new_buf)
+            die("Realloc failed.\n");
         *max += inc;
         return new_buf;
     }
@@ -88,7 +96,6 @@ void *try_realloc(void *buf, unsigned cur, unsigned *max,
  * size in out argument buf_len. Caller frees the buffer.
  */
 char *read_text_file(char *path, unsigned *buf_len) {
-
     int f;
     char *buf;
     unsigned count;
@@ -97,17 +104,17 @@ char *read_text_file(char *path, unsigned *buf_len) {
 
     f = open(path, O_RDONLY);
     if (f == -1)
-        die( "Cannot open file for reading, %s\n", path);
+        die("Cannot open file for reading, %s\n", path);
 
     cur = 0;
     max = IO_CHUNK;
-    buf = malloc( max * sizeof(*buf));
-    while ((count = read( f, buf + cur, IO_CHUNK))){
+    buf = malloc(max * sizeof(*buf));
+    while ((count = read(f, buf + cur, IO_CHUNK))) {
         if (count == -1)
             die("Cannot read from file %s\n", path);
 
         cur += count;
-        buf = try_realloc(buf, cur, &max, IO_CHUNK, sizeof( *buf));
+        buf = try_realloc(buf, cur, &max, IO_CHUNK, sizeof(*buf));
     }
     buf[cur] = '\0';
     close(f);
@@ -119,7 +126,6 @@ char *read_text_file(char *path, unsigned *buf_len) {
 
 /* Encodes the given buffer of bytes as a hex string. */
 unsigned char *hex_encode(unsigned char *in, unsigned len) {
-
     unsigned i;
     char *out;
 
