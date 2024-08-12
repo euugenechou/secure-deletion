@@ -23,10 +23,10 @@
 
 #include "dm-holepunch-main.h"
 
-#include "crypto/skcipher.h"
-#include "linux/bio.h"
-#include "linux/blk_types.h"
-#include "linux/proc_fs.h"
+#include <crypto/skcipher.h>
+#include <linux/bio.h>
+#include <linux/blk_types.h>
+#include <linux/proc_fs.h>
 
 #define STATEUNIT 100000
 #ifdef HOLEPUNCH_DEBUG
@@ -1812,7 +1812,9 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
     // if (unlikely(bio->bi_rw & (REQ_FLUSH | REQ_DISCARD))) {
     //     return DM_MAPIO_REMAPPED;
     // }
-    if (unlikely(bio->bi_opf & REQ_PREFLUSH || bio_op(bio) == REQ_OP_DISCARD)) {
+    if (unlikely(
+            bio_op(bio) == REQ_OP_FLUSH || bio_op(bio) == REQ_OP_DISCARD
+        )) {
         return DM_MAPIO_REMAPPED;
     }
 
@@ -2439,6 +2441,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv) {
     u8 hash[HP_HASH_LEN];
     u8 new_key[HOLEPUNCH_KEY_LEN];
     int need_master_rot = 0;
+    int ret;
 
     /*
 	 * argv[0]: real block device path
@@ -2539,7 +2542,7 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv) {
     /* Create bioset and page pool. */
     // EUGEBE: bioset_create() replaced with bioset_init()
     // rd->bioset = bioset_create(ERASER_BIOSET_SIZE, 0);
-    int ret = bioset_init(rd->bioset, ERASER_BIOSET_SIZE, 0, BIOSET_NEED_BVECS);
+    ret = bioset_init(rd->bioset, ERASER_BIOSET_SIZE, 0, BIOSET_NEED_BVECS);
     if (ret != 0) {
         ti->error = "Could not create bioset.";
         goto create_bioset_fail;

@@ -3,7 +3,9 @@
 
 #include <crypto/hash.h>
 #include <crypto/rng.h>
+#include <crypto/skcipher.h>
 #include <linux/bio.h>
+#include <linux/blk_types.h>
 #include <linux/blkdev.h>
 #include <linux/completion.h>
 #include <linux/crypto.h>
@@ -22,13 +24,13 @@
 #include <linux/scatterlist.h>
 #include <linux/semaphore.h>
 #include <linux/seq_file.h>
+#include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <net/sock.h>
 /* #include <net/genetlink.h> */
-#include <linux/skbuff.h>
-#include <linux/wait.h>
 
 #include "pprf-tree.h"
 
