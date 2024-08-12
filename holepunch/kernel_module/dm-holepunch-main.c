@@ -23,11 +23,6 @@
 
 #include "dm-holepunch-main.h"
 
-#include <crypto/skcipher.h>
-#include <linux/bio.h>
-#include <linux/blk_types.h>
-#include <linux/proc_fs.h>
-
 #define STATEUNIT 100000
 #ifdef HOLEPUNCH_DEBUG
     #include "linux/moduleparam.h"
