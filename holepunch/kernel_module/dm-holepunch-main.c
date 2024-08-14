@@ -24,6 +24,16 @@
 #include "dm-holepunch-main.h"
 
 #include "asm-generic/bug.h"
+#include "asm/bug.h"
+#include "asm/page_types.h"
+#include "linux/bio.h"
+#include "linux/blk_types.h"
+#include "linux/blkdev.h"
+#include "linux/compiler.h"
+#include "linux/device-mapper.h"
+#include "linux/gfp_types.h"
+#include "linux/math.h"
+#include "linux/mempool.h"
 
 #define STATEUNIT 100000
 #ifdef HOLEPUNCH_DEBUG
@@ -139,15 +149,18 @@ static void eraser_free_sector(void *s, struct holepunch_dev *rd) {
     mempool_free(p, rd->page_pool);
 }
 
-static struct bio *
-eraser_allocate_bio_multi_vector(int vec_no, struct holepunch_dev *rd) {
+static struct bio *eraser_allocate_bio_multi_vector(
+    int vec_no,
+    blk_opf_t opf,
+    struct holepunch_dev *rd
+) {
     struct bio *b;
 
     b = bio_alloc_bioset(
         rd->real_dev->bdev,
         vec_no,
-        0,  // TODO: idk what the default flags are
-        GFP_KERNEL,
+        opf,
+        GFP_NOIO,
         &rd->bioset
     );
     if (!b)
@@ -156,8 +169,9 @@ eraser_allocate_bio_multi_vector(int vec_no, struct holepunch_dev *rd) {
     return b;
 }
 
-static inline struct bio *eraser_allocate_bio(struct holepunch_dev *rd) {
-    return eraser_allocate_bio_multi_vector(1, rd);
+static inline struct bio *
+eraser_allocate_bio(struct holepunch_dev *rd, blk_opf_t opf) {
+    return eraser_allocate_bio_multi_vector(1, opf, rd);
 }
 
 static struct eraser_io_work *
@@ -309,25 +323,36 @@ static void __holepunch_blkcipher(
     struct skcipher_request *req;
     int r;
 
+    DMINFO("initialize scatterlists");
     sg_init_one(&sg_src, src, len);
     sg_init_one(&sg_dst, dst, len);
+    DMINFO("initialized scatterlists");
 
     DECLARE_CRYPTO_WAIT(wait);
 
+    DMINFO("allocating skcipher");
     req = skcipher_request_alloc(tfm, GFP_KERNEL);
     skcipher_request_set_crypt(req, &sg_src, &sg_dst, len, iv);
+    skcipher_request_set_callback(req, 0, crypto_req_done, &wait);
+    DMINFO("allocated skcipher");
 
     // EUGEBE: crypto_blkcipher_encrypt/decrypt should be synchronous.
     if (op == HOLEPUNCH_ENCRYPT) {
         // r = crypto_blkcipher_encrypt(&d, &sg_dst, &sg_src, len);
+        DMINFO("sync encryption start");
         r = crypto_wait_req(crypto_skcipher_encrypt(req), &wait);
-        if (r)
+        if (r) {
             DMERR("Error encrypting: %d", r);
+        }
+        DMINFO("sync encryption end");
     } else if (op == HOLEPUNCH_DECRYPT) {
         // r = crypto_blkcipher_decrypt(&d, &sg_dst, &sg_src, len);
+        DMINFO("sync decryption start");
         r = crypto_wait_req(crypto_skcipher_decrypt(req), &wait);
-        if (r)
+        if (r) {
             DMERR("Error decrypting: %d", r);
+        }
+        DMINFO("sync decryption end");
     } else {
         DMERR("Invalid crypto operation");
     }
@@ -394,8 +419,12 @@ static void holepunch_cbc_sector(
     u64 sectorno
 ) {
     u8 iv[ERASER_IV_LEN] = {0};
+    DMINFO("generating IV for sector: %llu", sectorno);
     holepunch_gen_iv(rd, iv, sectorno);
+    DMINFO("generated IV for sector: %llu", sectorno);
+    DMINFO("CBC start on sector: %llu", sectorno);
     holepunch_cbc(rd, dst, src, ERASER_SECTOR, op, key, iv);
+    DMINFO("CBC end on sector: %llu", sectorno);
 }
 
 /* Perform AES-CBC in-place on a single sector. */
@@ -481,14 +510,12 @@ static void *__eraser_rw_sector(
 ) {
     struct bio *bio;
     struct page *p;
+    blk_opf_t opf = 0;
 
     if (rw == WRITE && !write_buf) {
         DMWARN("Write buffer is NULL, aborting");
         return NULL;
     }
-    bio = eraser_allocate_bio(rd);
-    bio->bi_bdev = bdev;
-    bio->bi_iter.bi_sector = sector * ERASER_SECTOR_SCALE;
 
     if (rw == READ) {
         if (read_buf)
@@ -496,12 +523,17 @@ static void *__eraser_rw_sector(
         else
             p = eraser_allocate_page(rd);
         // bio->bi_rw &= ~REQ_WRITE;
-        bio->bi_opf &= ~REQ_OP_WRITE;
+        opf &= ~REQ_OP_WRITE;
     } else {
         p = virt_to_page(write_buf);
         // bio->bi_rw |= REQ_WRITE;
-        bio->bi_opf |= REQ_OP_WRITE;
+        opf |= REQ_OP_WRITE;
     }
+
+    bio = eraser_allocate_bio(rd, opf);
+    bio->bi_bdev = bdev;
+    bio->bi_iter.bi_sector = sector * ERASER_SECTOR_SCALE;
+
     BUG_ON(bio_add_page(bio, p, ERASER_SECTOR, 0) == 0);
 
     submit_bio_wait(bio);
@@ -1628,8 +1660,8 @@ static int holepunch_evict_map_cache(void *data) {
  */
 
 /* Called when an encrypted clone bio is written to disk. */
-static void HOLEPUNCH_ENCRYPTed_bio_end_io(struct bio *encrypted_bio) {
-    struct bio_vec vec;
+static void holepunch_encrypted_bio_end_io(struct bio *encrypted_bio) {
+    struct folio_iter fi;
     struct eraser_io_work *w =
         (struct eraser_io_work *)encrypted_bio->bi_private;
 
@@ -1638,11 +1670,24 @@ static void HOLEPUNCH_ENCRYPTed_bio_end_io(struct bio *encrypted_bio) {
     bio_endio(w->bio);
     bio_put(w->bio);
 
-    while (encrypted_bio->bi_iter.bi_size) {
-        vec = bio_iter_iovec(encrypted_bio, encrypted_bio->bi_iter);
-        bio_advance_iter(encrypted_bio, &encrypted_bio->bi_iter, vec.bv_len);
-        eraser_free_page(vec.bv_page, w->rd);
+    DMINFO("freeing pages");
+    // Apparently bio_for_each_folio_all() crashes with an empty bio
+    if (encrypted_bio->bi_vcnt > 0) {
+        bio_for_each_folio_all(fi, encrypted_bio) {
+            if (folio_test_large(fi.folio)) {
+                // folio_put(fi.folio);
+                DMCRIT("folio has multiple pages");
+            } else {
+                eraser_free_page(&fi.folio->page, w->rd);
+            }
+        }
     }
+    // while (encrypted_bio->bi_iter.bi_size) {
+    //     vec = bio_iter_iovec(encrypted_bio, encrypted_bio->bi_iter);
+    //     bio_advance_iter(encrypted_bio, &encrypted_bio->bi_iter, vec.bv_len);
+    //     eraser_free_page(vec.bv_page, w->rd);
+    // }
+    DMINFO("freed pages");
 
     bio_put(encrypted_bio);
     eraser_free_io_work(w);
@@ -1655,6 +1700,7 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w) {
     struct page *p;
     u8 key[HOLEPUNCH_KEY_LEN];
 
+    DMINFO("getting inode key");
     if (w->is_file) {
         holepunch_get_inode_key(
             w->rd,
@@ -1665,24 +1711,32 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w) {
     } else {
         memcpy(key, w->rd->sec_key, HOLEPUNCH_KEY_LEN);
     }
+    DMINFO("got inode key");
 
     /* Clone the original bio's pages, encrypt them, submit in a new bio. */
+    DMINFO(
+        "allocating new multi vector bio: bi_size = %u",
+        w->bio->bi_iter.bi_size
+    );
     encrypted_bio = eraser_allocate_bio_multi_vector(
         w->bio->bi_iter.bi_size / ERASER_SECTOR,
+        w->bio->bi_opf,
         w->rd
     );
+    DMINFO("allocated new multi vector bio");
 
     encrypted_bio->bi_bdev = w->bio->bi_bdev;
     encrypted_bio->bi_iter.bi_sector = w->bio->bi_iter.bi_sector;
-    // encrypted_bio->bi_rw = w->bio->bi_rw;
-    // bi_rw replaced by bi_opf https://github.com/ckane/zfs/commit/0483e13debd9a7cf01c89f4b5891af0c9b1ecea3
-    encrypted_bio->bi_opf = w->bio->bi_opf;
     encrypted_bio->bi_private = w;
-    encrypted_bio->bi_end_io = &HOLEPUNCH_ENCRYPTed_bio_end_io;
+    encrypted_bio->bi_end_io = holepunch_encrypted_bio_end_io;
 
     // EUGEBE: use bio_alloc_clone() instead of deprecated bio_clone_fast()
     // clone = bio_clone_fast(w->bio, GFP_NOIO, w->rd->bioset);
+    DMINFO("cloning bio");
     clone = bio_alloc_clone(w->bio->bi_bdev, w->bio, GFP_NOIO, &w->rd->bioset);
+    DMINFO("cloned bio");
+
+    DMINFO("iterating over bio");
     while (clone->bi_iter.bi_size) {
         vec = bio_iter_iovec(clone, clone->bi_iter);
         bio_advance_iter(clone, &clone->bi_iter, vec.bv_len);
@@ -1700,6 +1754,7 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w) {
         kunmap(vec.bv_page);
         BUG_ON(bio_add_page(encrypted_bio, p, ERASER_SECTOR, 0) == 0);
     }
+    DMINFO("iterated over bio");
 
     submit_bio(encrypted_bio);
     bio_put(clone);
@@ -1779,6 +1834,21 @@ static void eraser_read_end_io(struct bio *clone) {
     bio_put(clone);
 }
 
+static unsigned max_request_sectors(struct holepunch_dev *rd) {
+    unsigned val, sector_align;
+
+    // EUGEBE: Eraser seems to encrypt at block-granularity, but bio operates at
+    // sector granularity.
+    val = BIO_MAX_VECS << PAGE_SHIFT;
+    sector_align =
+        max(bdev_logical_block_size(rd->real_dev->bdev), ERASER_SECTOR);
+    val = round_down(val, sector_align);
+    if (unlikely(!val)) {
+        val = sector_align;
+    }
+    return val >> SECTOR_SHIFT;
+}
+
 /*
  * DM mapping function. This executes under make_generic_request(), and under
  * that function submit_bio() does not actually submit anything until we
@@ -1790,6 +1860,7 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
     struct bio *clone;
     struct eraser_io_work *w;
     struct holepunch_dev *rd = (struct holepunch_dev *)ti->private;
+    unsigned max_sectors;
 
     if (unlikely(!rd->virt_dev))
         rd->virt_dev = bio->bi_bdev->bd_dev;
@@ -1820,10 +1891,29 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
         return DM_MAPIO_REMAPPED;
     }
 
-    /* if (unlikely(bio->bi_iter.bi_size % ERASER_SECTOR != 0)) { */
-    /* 	DMCRIT("WARNING: Incorrect IO size! Something's terribly wrong!"); */
-    /* 	DMCRIT("remapping... sector: %lu, size: %u", bio->bi_iter.bi_sector, bio->bi_iter.bi_size); */
-    /* } */
+    max_sectors = max_request_sectors(rd);
+    if (unlikely(bio_sectors(bio) > max_sectors)) {
+        DMINFO(
+            "bio too large: actual=%u, max=%u",
+            bio_sectors(bio),
+            max_sectors
+        );
+        dm_accept_partial_bio(bio, max_sectors);
+    }
+
+    // if (unlikely(bio->bi_iter.bi_size % ERASER_SECTOR != 0)) {
+    // 	DMCRIT("WARNING: Incorrect IO size! Something's terribly wrong!");
+    // 	DMCRIT("remapping... sector: %lu, size: %u", bio->bi_iter.bi_sector, bio->bi_iter.bi_size);
+    // }
+    if (unlikely(bio->bi_iter.bi_size % ERASER_SECTOR != 0)) {
+        DMCRIT("WARNING: Incorrect IO size! Something's terribly wrong!");
+        DMCRIT(
+            "remapping... sector: %llu, size: %u",
+            bio->bi_iter.bi_sector,
+            bio->bi_iter.bi_size
+        );
+        return DM_MAPIO_KILL;
+    }
 
     w = eraser_allocate_io_work(bio, rd);
 
@@ -1856,7 +1946,7 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
         // clone = bio_clone_fast(bio, GFP_NOIO, rd->bioset);
         clone = bio_alloc_clone(bio->bi_bdev, bio, GFP_NOIO, &rd->bioset);
         clone->bi_private = w;
-        clone->bi_end_io = &eraser_read_end_io;
+        clone->bi_end_io = eraser_read_end_io;
         submit_bio(clone);
         return DM_MAPIO_SUBMITTED;
     }
