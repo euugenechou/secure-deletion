@@ -24,6 +24,7 @@
 #include "holepunch.h"
 
 #include <signal.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "crypto.h"
@@ -41,6 +42,7 @@ void handle_signal(int sig) {
 
 // EUGEBE: gross
 #define MAX_PASS_LEN ((1 << 15) + 1)
+#define PROC_FILE_NAME_LEN (16)
 
 char enc_key[HOLEPUNCH_KEY_LEN];
 char tpm_owner_pass[MAX_PASS_LEN];
@@ -262,7 +264,8 @@ void do_close(char *eraser_name) {
     /* Check all open ERASER instances. */
     done = 0;
     while (!done && (tok = strsep(&tok_buf, " "))) {
-        if (strcmp(tok, eraser_name) != 0) {
+        printf("checking %s...\n", tok);
+        if (strncmp(tok, eraser_name, PROC_FILE_NAME_LEN) != 0) {
             /* This is not what we are looking for. */
             strsep(&tok_buf, "\n"); /* Skip to the end of line. */
         } else {

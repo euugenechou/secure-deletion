@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
             arguments.args[2],
             arguments.args[1]
         );
-        do_open(arguments.args[1], arguments.args[2], arguments.mapped_dev);
+        do_open(arguments.args[1], arguments.args[2], arguments.args[2]);
     } else if (strcmp(arguments.args[0], COMMAND_CLOSE) == 0) {
         print_green("Closing HOLEPUNCH device %s \n", arguments.args[1]);
         do_close(arguments.args[1]);
