@@ -10,6 +10,8 @@ EXEC="$EXEC_ROOT/build/holepunch"
 DEVICE="${HOLEPUNCH_DEVICE:-/dev/vdb}"
 MOUNT="${HOLEPUNCH_MOUNT:-/mnt/home}"
 
+DM_NAME=test
+
 umount $MOUNT
 mkdir -p $MOUNT
 
@@ -20,9 +22,9 @@ fi
 insmod $KMOD
 
 printf "ooo\no\no" | $EXEC create $DEVICE 5
-printf "ooo\no" | $EXEC open $DEVICE test
-mkfs.ext4 /dev/mapper/holepunch
-mount /dev/mapper/holepunch $MOUNT
+printf "ooo\no" | $EXEC open $DEVICE $DM_NAME
+mkfs.ext4 /dev/mapper/$DM_NAME
+mount /dev/mapper/$DM_NAME $MOUNT
 cd $MOUNT
 
 echo hello > hi
@@ -36,7 +38,7 @@ rm hi
 cd ..
 umount $MOUNT
 
-mount /dev/mapper/holepunch $MOUNT
+mount /dev/mapper/$DM_NAME $MOUNT
 cd $MOUNT
 ls
 cat bar
@@ -44,14 +46,14 @@ cat baz
 echo yellow > hi
 cd ..
 umount $MOUNT
-$EXEC close test
+$EXEC close $DM_NAME
 
-# printf "ooo\no" | $EXEC open $DEVICE test
-# mount /dev/mapper/holepunch $MOUNT
+# printf "ooo\no" | $EXEC open $DEVICE $DM_NAME
+# mount /dev/mapper/$DM_NAME $MOUNT
 # cd $MOUNT
 # cat hi
 # cat bar
 # cat baz
 # cd ..
 # umount $MOUNT
-# $EXEC close test
+# $EXEC close $DM_NAME
