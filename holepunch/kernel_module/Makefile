@@ -1,6 +1,7 @@
 obj-m := dm-holepunch.o
 dm-holepunch-y := dm-holepunch-main.o pprf-tree.o
 
+SRC := $(wildcard *.c)
 KMOD_FILE := dm-holepunch.ko
 KMOD := dm_holepunch
 
@@ -31,7 +32,7 @@ endif
 .PHONY: all
 all: $(KMOD_FILE)
 
-$(KMOD_FILE):
+$(KMOD_FILE): $(SRC)
 	$(MAKE) -C $(KDIR) M=$$PWD modules ccflags-y="$(ccflags-y)"
 
 .PHONY: modules_install

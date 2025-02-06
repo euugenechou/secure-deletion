@@ -34,7 +34,10 @@ notpm: CFLAGS+=-DERASER_NO_TPM -DERASER_DEBUG
 notpm: all
 
 install: all
-	cp $(BUILDDIR)/$(EXEC) /usr/bin
+	cp $(BUILDDIR)/$(EXEC) /usr/local/bin/$(EXEC)
+
+symlink: notpm
+	ln -sf $$PWD/$(BUILDDIR)/$(EXEC) /usr/local/bin/$(EXEC)
 
 .PHONY: clean
 clean:
