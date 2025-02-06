@@ -1,5 +1,5 @@
 ifeq ($(TEST),)
-LINUXROOT := ~/linux
+KDIR := /lib/modules/`uname -r`/build
 endif
 
 obj-m := dm-holepunch.o
@@ -26,7 +26,10 @@ ccflags-y += -DPPRF_TIME
 endif
 
 all:
-	make -C $(LINUXROOT) M=$(PWD) modules ccflags-y="$(ccflags-y)"
+	$(MAKE) -C $(KDIR) M=$$PWD modules ccflags-y="$(ccflags-y)"
+
+modules_install: all
+	$(MAKE) -C $(KDIR) M=$$PWD modules_install
 
 debug: ccflags-y += -DHOLEPUNCH_DEBUG
 debug: all
@@ -35,4 +38,4 @@ debug_semas: ccflags-y += -DHOLEPUNCH_SEMA -DHOLEPUNCH_DEBUG
 debug_semas: all
 
 clean:
-	make -C $(LINUXROOT) M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
