@@ -2250,8 +2250,18 @@ static int eraser_unlink_kprobe_entry(struct kprobe *p, struct pt_regs *regs) {
 
     struct inode *inode = d_backing_inode(victim);
 
-    // EUGEBE: This feels absolutely criminal/violation of abstractions, but
-    // whatever, I really need this mnt_idmap lol. Not sure if it's correct though.
+    // Need to unwrap the `mnt_idmap` from the inode of the directory for
+    // use with `check_sticky()`. I'm not sure if the `mnt_idmap` reachable from
+    // the inode of the directory is the correct one for `check_sticky()`. The
+    // `mnt_idmap` argument wasn't needed in earlier versions of the kernel.
+    //
+    // NOTE: there's a `may_delete()` function under `fs/namei.c` as of kernel
+    // 6.13 that seems to do what the below does. Unfortunately, the function is
+    // defined as `static` and can't be used here.
+    if (!dir->i_sb || !dir->i_sb->s_bdev_file
+        || !dir->i_sb->s_bdev_file->f_path.mnt
+        || !dir->i_sb->s_bdev_file->f_path.mnt->mnt_idmap)
+        return 0;
     struct mnt_idmap *dir_idmap = dir->i_sb->s_bdev_file->f_path.mnt->mnt_idmap;
 
     /* Perform all permission checks first, maybe we cannot delete. */
@@ -2401,6 +2411,8 @@ static void eraser_netlink_recv(struct sk_buff *skb_in) {
     int len;
     u8 name[ERASER_NAME_LEN + 1];
     int found;
+
+    DMINFO("eraser_netlink_recv: [START]");
 
     h = (struct nlmsghdr *)skb_in->data;
     payload = nlmsg_data(h);
@@ -3148,29 +3160,37 @@ static int __init dm_eraser_init(void) {
 #ifdef PPRF_TIME
     preliminary_benchmark();
 #endif
+    DMINFO("Initialize netlink socket [START]");
     eraser_sock =
         netlink_kernel_create(&init_net, ERASER_NETLINK, &eraser_netlink_cfg);
     if (!eraser_sock) {
         DMERR("Netlink setup failed.");
         return -1;
     }
+    DMINFO("Initialize netlink socket [END]");
 
+    DMINFO("Register vfs_unlink kprobe [START]");
     r = register_kprobe(&eraser_unlink_kprobe);
     if (r < 0) {
         DMERR("Register kprobe failed %d", r);
         return r;
     }
+    DMINFO("Register vfs_unlink kprobe [END]");
 
+    DMINFO("Register device mapper target [START]");
     r = dm_register_target(&eraser_target);
     if (r < 0) {
         DMERR("dm_register failed %d", r);
         return r;
     }
+    DMINFO("Register device mapper target [END]");
 
+    DMINFO("Create proc file [START]");
     if (!proc_create(HOLEPUNCH_PROC_FILE, 0, NULL, &eraser_fops)) {
         DMERR("Cannot create proc file.");
         return -ENOMEM;
     }
+    DMINFO("Create proc file [END]");
 
     config_messages();
 
