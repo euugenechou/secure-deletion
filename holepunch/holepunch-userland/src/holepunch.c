@@ -210,17 +210,21 @@ int close_eraser(char *mapped_dev) {
         print_red("DEBUG: Cannot create dm_task\n");
         return 0;
     }
+    print_green("Closing: %s [CREATED TASK]\n", mapped_dev);
 
     if (!dm_task_set_name(dmt, mapped_dev)) {
         print_red("DEBUG: Cannot set device name\n");
         goto out;
     }
+    print_green("Closing: %s [SET TASK NAME]\n", mapped_dev);
 
     if (!dm_task_set_cookie(dmt, &cookie, udev_flags)) {
         goto out;
     }
+    print_green("Closing: %s [SET TASK COOKIE]\n", mapped_dev);
 
     dm_task_retry_remove(dmt);
+    print_green("Closing: %s [TASK REMOVED]\n", mapped_dev);
 
     if (!dm_task_run(dmt)) {
         print_red("DEBUG: Cannot issue ioctl\n");
@@ -234,7 +238,9 @@ int close_eraser(char *mapped_dev) {
 
 out:
     dm_udev_wait(cookie);
+    print_green("Closing: %s [COOKIE DESTROYED]\n", mapped_dev);
     dm_task_destroy(dmt);
+    print_green("Closing: %s [TASK DESTROYED]\n", mapped_dev);
 
     print_green("Done!\n");
     return is_success;

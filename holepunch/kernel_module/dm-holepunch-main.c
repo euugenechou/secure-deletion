@@ -1859,6 +1859,7 @@ static unsigned max_request_sectors(struct holepunch_dev *rd) {
 static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
     struct bio *clone;
     struct eraser_io_work *w;
+    struct page *bio_page;
     struct holepunch_dev *rd = (struct holepunch_dev *)ti->private;
     unsigned max_sectors;
 
@@ -1920,16 +1921,25 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
     /* Perform a few NULL pointer checks, these things do happen
 		 * when bio is not a read/write operation. */
     /* If this is file I/O... */
-    if (bio_iter_iovec(bio, bio->bi_iter).bv_page
-        && bio_iter_iovec(bio, bio->bi_iter).bv_page->mapping
-        && bio_iter_iovec(bio, bio->bi_iter).bv_page->mapping->host
-        && S_ISREG(
-            bio_iter_iovec(bio, bio->bi_iter).bv_page->mapping->host->i_mode
-        )) {
+
+    bio_page = bio_iter_iovec(bio, bio->bi_iter).bv_page;
+    if (bio_page && bio_page->mapping && bio_page->mapping->host
+        && S_ISREG(bio_page->mapping->host->i_mode)) {
         w->is_file = 1; /* We will perform file encryption. */
     } else {
         w->is_file = 0; /* We will perform good old disk sector encryption. */
     }
+
+    // if (bio_iter_iovec(bio, bio->bi_iter).bv_page
+    //     && bio_iter_iovec(bio, bio->bi_iter).bv_page->mapping
+    //     && bio_iter_iovec(bio, bio->bi_iter).bv_page->mapping->host
+    //     && S_ISREG(
+    //         bio_iter_iovec(bio, bio->bi_iter).bv_page->mapping->host->i_mode
+    //     )) {
+    //     w->is_file = 1; /* We will perform file encryption. */
+    // } else {
+    //     w->is_file = 0; /* We will perform good old disk sector encryption. */
+    // }
 
     /* We need to perform I/O to read keys, so send to bottom half. */
 
