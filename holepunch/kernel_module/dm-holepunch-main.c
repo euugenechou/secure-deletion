@@ -34,6 +34,8 @@
 #include "linux/gfp_types.h"
 #include "linux/math.h"
 #include "linux/mempool.h"
+// Folio helpers live in pagemap.h; use them instead of raw page->mapping.
+#include "linux/pagemap.h"
 
 #define STATEUNIT 100000
 #ifdef HOLEPUNCH_DEBUG
@@ -1922,12 +1924,20 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
 		 * when bio is not a read/write operation. */
     /* If this is file I/O... */
 
+    w->is_file = 0; /* Default to disk sector encryption. */
     bio_page = bio_iter_iovec(bio, bio->bi_iter).bv_page;
-    if (bio_page && bio_page->mapping && bio_page->mapping->host
-        && S_ISREG(bio_page->mapping->host->i_mode)) {
-        w->is_file = 1; /* We will perform file encryption. */
-    } else {
-        w->is_file = 0; /* We will perform good old disk sector encryption. */
+    if (bio_page) {
+        // folio_mapping() strips sentinel bits from page->mapping before use.
+        /*
+         * folio_mapping() strips the low-bit encoding used by the core MM
+         * code, so we don't accidentally dereference sentinel values such
+         * as PAGE_MAPPING_ANON.
+         */
+        struct folio *folio = page_folio(bio_page);
+        struct address_space *mapping = folio_mapping(folio);
+
+        if (mapping && mapping->host && S_ISREG(mapping->host->i_mode))
+            w->is_file = 1; /* Switch to file encryption. */
     }
 
     // if (bio_iter_iovec(bio, bio->bi_iter).bv_page
