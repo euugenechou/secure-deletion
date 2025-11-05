@@ -360,6 +360,7 @@ struct eraser_io_work {
     struct holepunch_dev *rd;
     struct bio *bio;
     unsigned is_file;
+    u64 file_ino;
     struct work_struct work;
 };
 

@@ -186,6 +186,8 @@ eraser_allocate_io_work(struct bio *bio, struct holepunch_dev *rd) {
     } else {
         w->bio = bio;
         w->rd = rd;
+        w->is_file = 0;
+        w->file_ino = 0;
     }
     return w;
 }
@@ -1703,13 +1705,8 @@ static void eraser_do_write_bottomhalf(struct eraser_io_work *w) {
     u8 key[HOLEPUNCH_KEY_LEN];
 
     // DMINFO("getting inode key");
-    if (w->is_file) {
-        holepunch_get_inode_key(
-            w->rd,
-            key,
-            bio_iter_iovec(w->bio, w->bio->bi_iter)
-                .bv_page->mapping->host->i_ino
-        );
+    if (w->is_file && w->file_ino) {
+        holepunch_get_inode_key(w->rd, key, w->file_ino);
     } else {
         memcpy(key, w->rd->sec_key, HOLEPUNCH_KEY_LEN);
     }
@@ -1768,13 +1765,8 @@ static void eraser_do_read_bottomhalf(struct eraser_io_work *w) {
     struct bio_vec vec;
     u8 key[HOLEPUNCH_KEY_LEN];
 
-    if (w->is_file) {
-        holepunch_get_inode_key(
-            w->rd,
-            key,
-            bio_iter_iovec(w->bio, w->bio->bi_iter)
-                .bv_page->mapping->host->i_ino
-        );
+    if (w->is_file && w->file_ino) {
+        holepunch_get_inode_key(w->rd, key, w->file_ino);
     } else {
         memcpy(key, w->rd->sec_key, HOLEPUNCH_KEY_LEN);
     }
@@ -1925,6 +1917,7 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
     /* If this is file I/O... */
 
     w->is_file = 0; /* Default to disk sector encryption. */
+    w->file_ino = 0;
     bio_page = bio_iter_iovec(bio, bio->bi_iter).bv_page;
     if (bio_page) {
         // folio_mapping() strips sentinel bits from page->mapping before use.
@@ -1936,8 +1929,10 @@ static int eraser_map_bio(struct dm_target *ti, struct bio *bio) {
         struct folio *folio = page_folio(bio_page);
         struct address_space *mapping = folio_mapping(folio);
 
-        if (mapping && mapping->host && S_ISREG(mapping->host->i_mode))
+        if (mapping && mapping->host && S_ISREG(mapping->host->i_mode)) {
             w->is_file = 1; /* Switch to file encryption. */
+            w->file_ino = mapping->host->i_ino;
+        }
     }
 
     // if (bio_iter_iovec(bio, bio->bi_iter).bv_page
