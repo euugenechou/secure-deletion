@@ -34,8 +34,13 @@
 #include "linux/gfp_types.h"
 #include "linux/math.h"
 #include "linux/mempool.h"
+#include "linux/string.h"
 // Folio helpers live in pagemap.h; use them instead of raw page->mapping.
 #include "linux/pagemap.h"
+#include "linux/version.h"
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#include "linux/mnt_idmapping.h"
+#endif
 
 #define STATEUNIT 100000
 #ifdef HOLEPUNCH_DEBUG
@@ -2260,10 +2265,13 @@ static void eraser_queue_unlink(struct eraser_unlink_work *w) {
 static int eraser_unlink_kprobe_entry(struct kprobe *p, struct pt_regs *regs) {
     struct holepunch_dev *rd;
     struct eraser_unlink_work *w;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+    struct mnt_idmap *dir_idmap = (struct mnt_idmap *)regs->di;
+    struct inode *dir = (struct inode *)regs->si;
+    struct dentry *victim = (struct dentry *)regs->dx;
+#else
     struct inode *dir = (struct inode *)regs->di;
     struct dentry *victim = (struct dentry *)regs->si;
-
-    struct inode *inode = d_backing_inode(victim);
 
     // Need to unwrap the `mnt_idmap` from the inode of the directory for
     // use with `check_sticky()`. I'm not sure if the `mnt_idmap` reachable from
@@ -2278,6 +2286,9 @@ static int eraser_unlink_kprobe_entry(struct kprobe *p, struct pt_regs *regs) {
         || !dir->i_sb->s_bdev_file->f_path.mnt->mnt_idmap)
         return 0;
     struct mnt_idmap *dir_idmap = dir->i_sb->s_bdev_file->f_path.mnt->mnt_idmap;
+#endif
+
+    struct inode *inode = d_backing_inode(victim);
 
     /* Perform all permission checks first, maybe we cannot delete. */
     if (d_is_negative(victim) || !inode || !inode->i_sb || !inode->i_sb->s_bdev
@@ -2550,8 +2561,8 @@ static struct netlink_kernel_cfg eraser_netlink_cfg = {
  */
 static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv) {
     struct holepunch_dev *rd;
-    char dummy;
     int helper_pid, i;
+    char *helper_pid_arg;
     u8 hash[HP_HASH_LEN];
     u8 new_key[HOLEPUNCH_KEY_LEN];
     int need_master_rot = 0;
@@ -2571,7 +2582,8 @@ static int eraser_ctr(struct dm_target *ti, unsigned int argc, char **argv) {
 
     DMINFO("Creating ERASER on %s", argv[0]);
 
-    if (sscanf(argv[4], "%d%c", &helper_pid, &dummy) != 1) {
+    helper_pid_arg = strim(argv[4]);
+    if (kstrtoint(helper_pid_arg, 10, &helper_pid) != 0) {
         ti->error = "Invalid arguments.";
         return -EINVAL;
     }
